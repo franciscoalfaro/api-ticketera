@@ -2,9 +2,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { connection } from './bd/conexion.js';
+
 import path from 'path';
 import cookieParser from 'cookie-parser';
+import { connection } from './connection/connection.js';
 
 dotenv.config();
 

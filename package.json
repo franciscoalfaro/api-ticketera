@@ -6,13 +6,15 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "nodemon index.js",
-    "start": "node index.js"
+    "dev": "nodemon ticketApp.js",
+    "start": "node ticketApp.js"
   },
   "author": "Francisco alfaro",
   "license": "MIT",
   "dependencies": {
+    "@azure/msal-node": "^3.8.0",
     "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
