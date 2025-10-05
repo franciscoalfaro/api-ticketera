@@ -1,6 +1,6 @@
 import * as microsoftService from "./microsoft.service.js";
 import * as UserService from "../users/user.service.js";
-import { createToken, createRefreshToken } from "../services/jwt.js";
+import { createToken, createRefreshToken } from "../../core/services/jwt.js";
 
 export const redirectToMicrosoftLogin = async (req, res, next) => {
   try {

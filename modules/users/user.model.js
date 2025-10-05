@@ -12,13 +12,21 @@ const userSchema = new mongoose.Schema({
     },
     microsoftId: {
         type: String,
-        required: true,
+        required: false,
         unique: true
+    },
+    password: { 
+        type: String
     },
     role: {
         type: String,
         enum: ["agente", "admin", "cliente"], // roles permitidos
         default: "agente"
+    },
+    type: { 
+        type: String, 
+        enum: ['local','microsoft'], 
+        default: 'local' 
     },
     createdAt: {
         type: Date,

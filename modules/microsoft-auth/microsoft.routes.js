@@ -1,6 +1,6 @@
 // microsoft.routes.js
 import { Router } from "express";
-import {redirectToMicrosoftLogin,handleMicrosoftCallback } from '../microsoft-auth/microsoft.controller';
+import {redirectToMicrosoftLogin,handleMicrosoftCallback } from '../microsoft-auth/microsoft.controller.js';
 
 const router = Router();
 

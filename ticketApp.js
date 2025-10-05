@@ -3,6 +3,10 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
+import authRoutes from './modules/auth/auth.routes.js';
+import userRoutes from './modules/users/user.routes.js';
+import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
+
 import path from 'path';
 import cookieParser from 'cookie-parser';
 import { connection } from './connection/connection.js';
@@ -41,8 +45,14 @@ app.use(cookieParser());
 
 app.use('/uploads', express.static(path.join('uploads')));
 
-// Rutas
 
+// Rutas públicas (Auth)
+app.use('/api/auth', authRoutes);
+// Rutas públicas Microsoft (Auth)
+app.use('/api/microsoft',microsoftRoutes );
+
+// Rutas protegidas (Users)
+app.use('/api/users', userRoutes);
 
 
 // Iniciar el servidor
