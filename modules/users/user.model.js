@@ -13,7 +13,8 @@ const userSchema = new mongoose.Schema({
     microsoftId: {
         type: String,
         required: false,
-        unique: true
+        unique: true,
+        sparse: true,
     },
     password: { 
         type: String

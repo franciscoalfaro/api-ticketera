@@ -8,6 +8,10 @@ import moment from "moment";
 const secret_key = process.env.SECRET_KEY;
 const refresh_secret_key = process.env.REFRESH_SECRET_KEY;
 
+console.log("SECRET_KEY:", process.env.SECRET_KEY);
+console.log("REFRESH_SECRET_KEY:", process.env.REFRESH_SECRET_KEY);
+
+
 export const createToken = (user) => {
   const payload = {
     id: user.id,

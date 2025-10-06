@@ -17,7 +17,7 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     const { code } = req.query;
     const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
 
-    //  Obtener tokens de Microsoft
+    // Obtener tokens de Microsoft
     const tokenResponse = await microsoftService.getTokenByAuthCode(code, redirectUri);
     const idToken = tokenResponse.idTokenClaims;
 
@@ -38,21 +38,15 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     const accessToken = createToken(user);
     const refreshToken = createRefreshToken(user);
 
-    // Guardar tokens en cookies HTTP-only
+    // Guardar tokens en cookies seguras
     res.cookie('access_token', accessToken, { httpOnly: true, secure: true, sameSite: 'None' });
     res.cookie('refresh_token', refreshToken, { httpOnly: true, secure: true, sameSite: 'None' });
 
-    // Enviar respuesta al frontend
-    res.json({
-      status: "success",
-      user,
-      message: "login correcto con Microsoft"
-    });
+    // Redirigir al frontend con parámetros opcionales
+    res.redirect(`http://localhost:3000/#/dashboard`);
   } catch (error) {
     console.error(error);
-    res.status(500).json({
-      status: "error",
-      message: "Error interno al autenticar con Microsoft"
-    });
+    res.redirect(`http://localhost:5173/login?error=auth_failed`);
   }
 };
+

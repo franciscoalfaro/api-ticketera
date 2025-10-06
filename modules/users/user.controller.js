@@ -23,10 +23,28 @@ export const getUser = async (req, res) => {
   }
 };
 
+
+// Obtener un usuario por token
+export const getUserProfile = async (req, res) => {
+  const idProfile = req.user.id
+  console.log('el id del usuario es :', idProfile)
+  try {
+    const user = await UserService.getUserById(idProfile);
+    if (!user) return res.status(404).json({ status: "error", message: "Usuario no encontrado" });
+    res.json({ status: "success", user });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ status: "error", message: "Error obteniendo usuario" });
+  }
+};
+
+
 // Crear o registrar usuarios por el agente o administrador
 export const createUser = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
+
+    console.log('cuerpo', req.body)
     const user = await UserService.createUser({ name, email, password, role });
     res.status(201).json({ status: "success", user });
   } catch (error) {

@@ -23,7 +23,7 @@ app.use(express.urlencoded({extended:true}));
 
 
 
-const allowedOrigins = ['*'];
+const allowedOrigins = ['http://localhost:3000/' ,'http://localhost:3000','http://localhost:3001/'];
 
 const corsOptions = {
   origin: (origin, callback) => {

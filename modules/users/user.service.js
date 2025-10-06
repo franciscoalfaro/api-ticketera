@@ -24,6 +24,7 @@ export const getUserById = async (id) => {
 
 // Crear un usuario manual (opcional, además de auth.register)
 export const createUser = async ({ name, email, password, role }) => {
+
   const existing = await User.findOne({ email });
   if (existing) throw new Error("Usuario ya existe");
 
