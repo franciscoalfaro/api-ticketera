@@ -17,24 +17,32 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     const { code } = req.query;
     const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
 
-    // Obtener tokens de Microsoft
+    //  Obtener tokens de Microsoft
     const tokenResponse = await microsoftService.getTokenByAuthCode(code, redirectUri);
     const idToken = tokenResponse.idTokenClaims;
 
-    // Buscar usuario en MongoDB
+    //  Buscar usuario en MongoDB por email
     let user = await UserService.findByEmail(idToken.preferred_username);
 
-    // Crear usuario si no existe
-    if (!user) {
+    if (user) {
+      //  Si el usuario existe pero no tiene microsoftId, actualízalo
+      if (!user.microsoftId) {
+        user.microsoftId = idToken.oid;
+        user.type = "microsoft";
+        await user.save();
+      }
+    } else {
+      //  Si no existe, créalo
       user = await UserService.create({
         name: idToken.name,
         email: idToken.preferred_username,
         microsoftId: idToken.oid,
         role: "agente",
+        type: "microsoft",
       });
     }
 
-    // Generar JWT interno
+    // 5️⃣ Generar JWT interno
     const accessToken = createToken(user);
     const refreshToken = createRefreshToken(user);
 
@@ -42,11 +50,10 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     res.cookie('access_token', accessToken, { httpOnly: true, secure: true, sameSite: 'None' });
     res.cookie('refresh_token', refreshToken, { httpOnly: true, secure: true, sameSite: 'None' });
 
-    // Redirigir al frontend con parámetros opcionales
-    res.redirect(`http://localhost:3000/#/dashboard`);
+    // Redirigir al frontend
+    res.redirect("http://localhost:3000/#/dashboard");
   } catch (error) {
-    console.error(error);
-    res.redirect(`http://localhost:5173/login?error=auth_failed`);
+    console.error("Error en handleMicrosoftCallback:", error);
+    res.redirect("http://localhost:5173/login?error=auth_failed");
   }
 };
-

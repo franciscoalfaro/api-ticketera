@@ -44,12 +44,26 @@ export const createUser = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
-    console.log('cuerpo', req.body)
-    const user = await UserService.createUser({ name, email, password, role });
-    res.status(201).json({ status: "success", user });
+    const user = await UserService.createUserService({ name, email, password, role });
+    res.status(201).json({
+      status: "success",
+      user,
+      message: "Usuario creado correctamente"
+    });
   } catch (error) {
-    console.error(error);
-    res.status(400).json({ status: "error", message: error.message });
+    console.error("Error al crear usuario:", error);
+
+    if (error.code === "USER_EXISTS") {
+      return res.status(409).json({
+        status: "error",
+        message: "El usuario ya existe"
+      });
+    }
+
+    res.status(500).json({
+      status: "error",
+      message: "Error interno al crear usuario"
+    });
   }
 };
 

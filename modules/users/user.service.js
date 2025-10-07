@@ -23,13 +23,17 @@ export const getUserById = async (id) => {
 };
 
 // Crear un usuario manual (opcional, además de auth.register)
-export const createUser = async ({ name, email, password, role }) => {
-
+export const createUserService = async ({ name, email, password, role }) => {
   const existing = await User.findOne({ email });
-  if (existing) throw new Error("Usuario ya existe");
+  if (existing) {
+    const error = new Error("El usuario ya existe");
+    error.code = "USER_EXISTS";
+    throw error;
+  }
 
   const hashed = password ? await bcrypt.hash(password, 10) : undefined;
-  return await User.create({ name, email, password: hashed, role });
+  const user = await User.create({ name, email, password: hashed, role });
+  return user;
 };
 
 // Actualizar usuario
