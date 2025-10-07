@@ -27,7 +27,6 @@ export const getUser = async (req, res) => {
 // Obtener un usuario por token
 export const getUserProfile = async (req, res) => {
   const idProfile = req.user.id
-  console.log('el id del usuario es :', idProfile)
   try {
     const user = await UserService.getUserById(idProfile);
     if (!user) return res.status(404).json({ status: "error", message: "Usuario no encontrado" });
