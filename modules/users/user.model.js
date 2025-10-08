@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ["agente", "admin", "cliente"], // roles permitidos
+        enum: ["agente", "admin", "cliente","invitado"], // roles permitidos
         default: "agente"
     },
     type: {
