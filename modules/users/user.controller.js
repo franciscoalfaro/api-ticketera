@@ -1,9 +1,9 @@
-import * as UserService from "./user.service.js";
+import { activateUserService, createUserService, deleteUserService, getAllUsers, getUserById, updateUserService } from "./user.service.js";
 
 // Obtener todos los usuarios o listar los usuarios
 export const getUsers = async (req, res) => {
   try {
-    const users = await UserService.getAllUsers();
+    const users = await getAllUsers();
     res.json({ status: "success", users });
   } catch (error) {
     console.error(error);
@@ -14,7 +14,7 @@ export const getUsers = async (req, res) => {
 // Obtener un usuario por ID
 export const getUser = async (req, res) => {
   try {
-    const user = await UserService.getUserById(req.params.id);
+    const user = await getUserById(req.params.id);
     if (!user) return res.status(404).json({ status: "error", message: "Usuario no encontrado" });
     res.json({ status: "success", user });
   } catch (error) {
@@ -28,7 +28,7 @@ export const getUser = async (req, res) => {
 export const getUserProfile = async (req, res) => {
   const idProfile = req.user.id
   try {
-    const user = await UserService.getUserById(idProfile);
+    const user = await getUserById(idProfile);
     if (!user) return res.status(404).json({ status: "error", message: "Usuario no encontrado" });
     res.json({ status: "success", user });
   } catch (error) {
@@ -43,7 +43,7 @@ export const createUser = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
-    const user = await UserService.createUserService({ name, email, password, role });
+    const user = await createUserService({ name, email, password, role });
     res.status(201).json({
       status: "success",
       user,
@@ -69,7 +69,7 @@ export const createUser = async (req, res) => {
 // Actualizar usuario
 export const updateUser = async (req, res) => {
   try {
-    const updatedUser = await UserService.updateUser(req.params.id, req.body);
+    const updatedUser = await updateUserService(req.params.id, req.body);
     res.json({ status: "success", user: updatedUser });
   } catch (error) {
     console.error(error);
@@ -77,13 +77,43 @@ export const updateUser = async (req, res) => {
   }
 };
 
-// Eliminar usuario
-export const deleteUser = async (req, res) => {
+// Actualizar usuario
+export const activateUser = async (req, res) => {
   try {
-    await UserService.deleteUser(req.params.id);
-    res.json({ status: "success", message: "Usuario eliminado" });
+    const updatedUser = await activateUserService(req.params.id);
+    res.json({ status: "success", user: updatedUser });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ status: "error", message: error.message });
+    res.status(400).json({ status: "error", message: error.message });
   }
 };
+
+// el admin al eliminar debera de cambiar automaticamente el equipamiento del usuario en transito o similar
+
+// Eliminar usuario - al eliminar el usuario solo el admin podra eliminar - 
+
+export const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Verificar rol del usuario autenticado
+    if (!req.user || req.user.role !== "admin") {
+      return res.status(403).json({
+        status: "error",
+        message: "No tienes permisos para eliminar usuarios"
+      });
+    }
+
+    const result = await deleteUserService(id);
+    res.json(result);
+    
+  } catch (error) {
+    console.error("Error al eliminar usuario:", error);
+    res.status(500).json({ 
+      status: "error", 
+      message: error.message || "Error interno del servidor" 
+    });
+  }
+};
+
+

@@ -12,12 +12,12 @@ const userSchema = new mongoose.Schema({
     },
     microsoftId: {
         type: String,
-        default: "",
+        default: '',
         required: false,
         unique: true,
         sparse: true,
     },
-    password: { 
+    password: {
         type: String
     },
     role: {
@@ -25,14 +25,22 @@ const userSchema = new mongoose.Schema({
         enum: ["agente", "admin", "cliente"], // roles permitidos
         default: "agente"
     },
-    type: { 
-        type: String, 
-        enum: ['local','microsoft'], 
-        default: 'local' 
+    type: {
+        type: String,
+        enum: ['local', 'microsoft'],
+        default: 'local'
     },
     createdAt: {
         type: Date,
         default: Date.now
+    },
+    isDeleted: {
+        type: Boolean,
+        default: false
+    },
+    deletedAt: {
+        type: Date,
+        default: null
     },
 });
 
