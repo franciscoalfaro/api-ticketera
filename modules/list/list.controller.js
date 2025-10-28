@@ -1,4 +1,4 @@
-import {addItemToListService, createListService, deleteItemFromListService, getAllListsService } from "./list.services.js";
+import {addItemToListService, createListService, deleteItemFromListService, getAllListsService, updateItemDeletedStatusService } from "./list.services.js";
 
 // Obtener todas las listas
 export const getAllListsController = async (req, res) => {
@@ -24,11 +24,27 @@ export const createListController = async (req, res) => {
 // Agregar un elemento a una lista
 export const addItemController = async (req, res) => {
   try {
-    const { listId } = req.params;
-    const list = await addItemToListService(listId, req.body);
-    res.status(200).json({ status: "success", list });
+    const { listId, label, value, color } = req.body;
+
+    if (!listId || !label || !value) {
+      return res.status(400).json({
+        status: "error",
+        message: "Faltan datos obligatorios (listId, label, value)",
+      });
+    }
+
+    const list = await addItemToListService(listId, { label, value, color });
+
+    res.status(200).json({
+      status: "success",
+      message: "Elemento agregado correctamente",
+      list,
+    });
   } catch (error) {
-    res.status(400).json({ status: "error", message: error.message });
+    res.status(400).json({
+      status: "error",
+      message: error.message,
+    });
   }
 };
 
@@ -41,5 +57,33 @@ export const deleteItemController = async (req, res) => {
     res.status(200).json({ status: "success", list });
   } catch (error) {
     res.status(400).json({ status: "error", message: error.message });
+  }
+};
+
+//actualizar estado de elemento de la lista 
+
+export const updateItemDeletedStatusController = async (req, res) => {
+  try {
+    const { listId, itemId, isDeleted } = req.body;
+
+    if (!listId || !itemId || typeof isDeleted !== "boolean") {
+      return res.status(400).json({
+        status: "error",
+        message: "Faltan datos obligatorios o formato inválido (listId, itemId, isDeleted)",
+      });
+    }
+
+    const result = await updateItemDeletedStatusService(listId, itemId, isDeleted);
+
+    res.status(200).json({
+      status: "success",
+      message: result.message,
+      list: result.list,
+    });
+  } catch (error) {
+    res.status(400).json({
+      status: "error",
+      message: error.message,
+    });
   }
 };
