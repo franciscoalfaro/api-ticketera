@@ -1,3 +1,4 @@
+import { createLog } from "../../core/services/log.service.js";
 import { activateUserService, createUserService, deleteUserService, getAllUsers, getUserById, updateUserService } from "./user.service.js";
 
 // Obtener todos los usuarios o listar los usuarios
@@ -42,15 +43,21 @@ export const getUserProfile = async (req, res) => {
 export const createUser = async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
-
     const user = await createUserService({ name, email, password, role });
+    await createLog({
+      user: req.user?.id,
+      action: "CREAR_USUARIO",
+      module: "users",
+      description: `nuevo usuario: ${user.name}`,
+      status: "success",
+      method: "POST",
+    });
     res.status(201).json({
       status: "success",
       user,
       message: "Usuario creado correctamente"
     });
   } catch (error) {
-    console.error("Error al crear usuario:", error);
 
     if (error.code === "USER_EXISTS") {
       return res.status(409).json({
@@ -58,6 +65,13 @@ export const createUser = async (req, res) => {
         message: "El usuario ya existe"
       });
     }
+    await createLog({
+      user: req.user.id,
+      action: "ERROR_CREAR_USUARIO",
+      module: "users",
+      description: error.message,
+      status: "error",
+    });
 
     res.status(500).json({
       status: "error",
@@ -106,12 +120,12 @@ export const deleteUser = async (req, res) => {
 
     const result = await deleteUserService(id);
     res.json(result);
-    
+
   } catch (error) {
     console.error("Error al eliminar usuario:", error);
-    res.status(500).json({ 
-      status: "error", 
-      message: error.message || "Error interno del servidor" 
+    res.status(500).json({
+      status: "error",
+      message: error.message || "Error interno del servidor"
     });
   }
 };

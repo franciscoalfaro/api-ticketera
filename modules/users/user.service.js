@@ -11,7 +11,6 @@ export const create = async (data) => {
 };
 //-------------------------
 
-
 // Obtener todos los usuarios
 export const getAllUsers = async () => {
   return await User.find();
@@ -24,17 +23,74 @@ export const getUserById = async (id) => {
 
 // Crear un usuario manual (opcional, además de auth.register, se debe de incrementar el id, validando previamente que microsoftId no este en uso  )
 export const createUserService = async ({ name, email, password, role }) => {
-  const existing = await User.findOne({ email });
-  if (existing) {
-    const error = new Error("El usuario ya existe");
-    error.code = "USER_EXISTS";
+  try {
+    // Normalizar datos
+    const userRole = role?.toLowerCase() || "cliente";
+
+    // 🔍 Validar campos requeridos según el rol
+    if (!name || !email) {
+      const error = new Error("Faltan campos requeridos (name o email).");
+      error.code = "MISSING_FIELDS";
+      throw error;
+    }
+
+    // Solo agente o administrador requieren contraseña
+    if ((userRole === "agente" || userRole === "administrador") && !password) {
+      const error = new Error("El campo password es requerido para agentes y administradores.");
+      error.code = "MISSING_PASSWORD";
+      throw error;
+    }
+
+    // ✅ Validar formato de correo
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      const error = new Error("El correo electrónico no tiene un formato válido.");
+      error.code = "INVALID_EMAIL";
+      throw error;
+    }
+
+    // ✅ Verificar si el usuario ya existe
+    const existing = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existing) {
+      const error = new Error("El usuario ya existe.");
+      error.code = "USER_EXISTS";
+      throw error;
+    }
+
+    // 🔐 Hashear la contraseña solo si corresponde
+    let hashedPassword = undefined;
+    if (password && (userRole === "agente" || userRole === "administrador")) {
+      hashedPassword = await bcrypt.hash(password, 10);
+    }
+
+    // 🧩 Crear el usuario
+    const user = new User({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashedPassword, // puede ser undefined
+      role: userRole,
+      microsoftId: `local-${Date.now()}`
+    });
+
+    await user.save();
+
+    // 🔒 Retornar datos seguros
+    const safeUser = user.toObject();
+    delete safeUser.password;
+
+    return safeUser;
+
+  } catch (err) {
+    console.error("Error en createUserService:", err.message);
+
+    if (err.code) throw err;
+
+    const error = new Error("Error interno al crear el usuario.");
+    error.code = "INTERNAL_ERROR";
     throw error;
   }
-
-  const hashed = password ? await bcrypt.hash(password, 10) : undefined;
-  const user = await User.create({ name, email, password: hashed, role, microsoftId: `local-${Date.now()}`});
-  return user;
 };
+
 
 // Actualizar usuario
 export const updateUserService = async (id, updateData) => {

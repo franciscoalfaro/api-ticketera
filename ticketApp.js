@@ -5,11 +5,16 @@ import dotenv from 'dotenv';
 
 import authRoutes from './modules/auth/auth.routes.js';
 import userRoutes from './modules/users/user.routes.js';
+import listRoutes from './modules/list/list.routes.js'
+import assetsRoutes from './modules/assets/asset.routes.js'
 import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
 
 import path from 'path';
 import cookieParser from 'cookie-parser';
 import { connection } from './connection/connection.js';
+
+import { seedDefaultLists } from "./seed/seedLists.js";
+
 
 dotenv.config();
 
@@ -54,9 +59,19 @@ app.use('/api/microsoft',microsoftRoutes );
 // Rutas protegidas (Users)
 app.use('/api/users', userRoutes);
 
+// Rutas protegidas (listas)
+app.use('/api/option', listRoutes);
+
+// Rutas protegidas (Assets)
+app.use('/api/assets', assetsRoutes);
 
 // Iniciar el servidor
 const PORT = process.env.PORT;
+
+
+(async () => {
+  await seedDefaultLists();
+})();
 
 
 app.listen(PORT, () => {

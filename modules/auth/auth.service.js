@@ -86,8 +86,6 @@ export const registerServiceLocal = async ({ name, email, password, role }) => {
   return newUser;
 };
 
-
-
 export const logoutService = async (accessToken, refreshToken) => {
   try {
     if (accessToken) {
