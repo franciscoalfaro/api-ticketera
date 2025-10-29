@@ -6,7 +6,7 @@ export const logAction = (module) => {
       // Guardar solo si no es ruta de logs
       if (!req.originalUrl.includes("/logs")) {
         await createLog({
-          user: req.user?._id,
+          user: req.user.id,
           action: `${req.method} ${req.originalUrl}`,
           module,
           description: res.statusCode < 400 ? "Acción exitosa" : "Acción con error",

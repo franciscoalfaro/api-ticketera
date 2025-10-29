@@ -60,8 +60,7 @@ export const deleteItemController = async (req, res) => {
   }
 };
 
-//actualizar estado de elemento de la lista 
-
+//actualizar estado de elemento de la lista controller
 export const updateItemDeletedStatusController = async (req, res) => {
   try {
     const { listId, itemId, isDeleted } = req.body;

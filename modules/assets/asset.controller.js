@@ -1,5 +1,5 @@
 import { createLog } from "../../core/services/log.service.js";
-import {  createAssetService, deleteAssetService, getAllAssetsService, getAssetByIdService, updateAssetService } from './asset.service.js'
+import { createAssetService, deleteAssetService, getAllAssetsService, getAssetByIdService, updateAssetService } from './asset.service.js'
 
 // Crear un activo
 export const createAsset = async (req, res) => {
@@ -7,6 +7,7 @@ export const createAsset = async (req, res) => {
   try {
     const asset = await createAssetService(req.body, req.user.id);
 
+    res.status(201).json({ status: "success", asset });
     await createLog({
       user: req.user.id,
       action: "CREAR_ACTIVO",
@@ -15,7 +16,6 @@ export const createAsset = async (req, res) => {
       status: "success",
       method: "POST",
     });
-    res.status(201).json({ status: "success", asset });
   } catch (error) {
     console.error(error);
     await createLog({
@@ -66,9 +66,8 @@ export const getAssetById = async (req, res) => {
 export const updateAsset = async (req, res) => {
   try {
     const asset = await updateAssetService(req.params.id, req.body);
-    console.log('equipaamiento',asset)
     await createLog({
-      user: req.user?.id,
+      user: req.user.id,
       action: "ACTUALIZAR_ACTIVO",
       module: "assets",
       description: `Equipo actualizado: ${asset.name}`,
@@ -86,7 +85,7 @@ export const deleteAsset = async (req, res) => {
   try {
     const result = await deleteAssetService(req.params.id);
     await createLog({
-      user: req.user?.id,
+      user: req.user.id,
       action: "ELIMINAR_ACTIVO",
       module: "assets",
       description: `Activo ID ${req.params.id} eliminado`,

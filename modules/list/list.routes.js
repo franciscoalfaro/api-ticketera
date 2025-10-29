@@ -1,9 +1,11 @@
 import express from "express";
 import { addItemController, createListController, deleteItemController, getAllListsController, updateItemDeletedStatusController } from "./list.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
+import { logAction } from "../../core/middlewares/logMiddleware.js";
 
 const router = express.Router();
 router.use(auth);
+router.use(logAction("list"));
 
 // Rutas principales
 router.get("/listall", getAllListsController);
