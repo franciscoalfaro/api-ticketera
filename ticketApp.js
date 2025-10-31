@@ -8,6 +8,8 @@ import userRoutes from './modules/users/user.routes.js';
 import listRoutes from './modules/list/list.routes.js'
 import assetsRoutes from './modules/assets/asset.routes.js'
 import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
+import ticketRoutes from './modules/tickets/ticket.routes.js'
+
 
 import path from 'path';
 import cookieParser from 'cookie-parser';
@@ -64,6 +66,9 @@ app.use('/api/option', listRoutes);
 
 // Rutas protegidas (Assets)
 app.use('/api/assets', assetsRoutes);
+
+// Rutas protegidas (Ticket)
+app.use('/api/ticket', ticketRoutes);
 
 // Iniciar el servidor
 const PORT = process.env.PORT;
