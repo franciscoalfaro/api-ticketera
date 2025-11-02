@@ -1,77 +1,180 @@
 import Ticket from "./ticket.model.js";
-import fs from "fs";
+import List from "../list/list.model.js";
 import path from "path";
 
-// 🔹 Generar correlativo automático
+// Generar correlativo automático
 export const generateTicketCode = async () => {
   const lastTicket = await Ticket.findOne().sort({ createdAt: -1 });
   let counter = 1;
-  if (lastTicket && lastTicket.code) {
+  if (lastTicket?.code) {
     const num = parseInt(lastTicket.code.split("-")[1]);
     if (!isNaN(num)) counter = num + 1;
   }
   return `TCK-${counter.toString().padStart(4, "0")}`;
 };
 
-// 🔹 Crear ticket manual o automático
-export const createTicketService = async ({ subject, description, requester, source, attachments = [] }) => {
-  const code = await generateTicketCode();
+// Crear ticket
 
-  const ticket = await Ticket.create({
+
+export const createTicketService = async (data) => {
+  // Generar código automático
+  const code = await generateTicketCode();
+  const ticket = new Ticket({
     code,
-    subject,
-    description,
-    requester,
-    source,
-    attachments,
+    ...data
   });
 
+  await ticket.save();
   return ticket;
 };
 
-// 🔹 Obtener tickets paginados
+// Obtener todos los tickets (paginado)
 export const getTicketsService = async (page = 1, limit = 10) => {
   const skip = (page - 1) * limit;
+
   const [tickets, total] = await Promise.all([
     Ticket.find({ isDeleted: false })
+      .populate("requester", "name email")
+      .populate("assignedTo", "name email")
+      .populate("closedBy", "name email")
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .sort({ createdAt: -1 }),
+      .lean(),
     Ticket.countDocuments({ isDeleted: false }),
   ]);
 
+  // ✅ Nombres de listas correctos
+  const lists = await List.find({
+    name: {
+      $in: [
+        "Estados de Ticket",
+        "Prioridades",
+        "Impacto",
+        "Departamentos",
+        "Tipos de Ticket",
+        "Medios de Reporte",
+      ],
+    },
+  }).lean();
+
+  const findItemById = (id) => {
+    for (const list of lists) {
+      const item = list.items.find((i) => i._id.toString() === id?.toString());
+      if (item) return { label: item.label, value: item.value, _id: item._id };
+    }
+    return null;
+  };
+
+  const enrichedTickets = tickets.map((t) => ({
+    ...t,
+    source: findItemById(t.source),
+    status: findItemById(t.status),
+    priority: findItemById(t.priority),
+    impact: findItemById(t.impact),
+    department: findItemById(t.department),
+    type: findItemById(t.type),
+  }));
+
   return {
-    tickets,
+    tickets: enrichedTickets,
     currentPage: page,
     totalPages: Math.ceil(total / limit),
   };
 };
 
-// 🔹 Adjuntar archivos manualmente
+
+
+// Obtener tickets asignados al usuario autenticado
+export const getMyTicketsService = async (userId, page = 1, limit = 10) => {
+  const skip = (page - 1) * limit;
+  const filter = { isDeleted: false, assignedTo: userId };
+
+  const [tickets, total] = await Promise.all([
+    Ticket.find(filter).populate("assignedTo", "name email").sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Ticket.countDocuments(filter),
+  ]);
+
+  return { tickets, currentPage: page, totalPages: Math.ceil(total / limit), totalTickets: total };
+};
+
+// Adjuntar archivos a un ticket
 export const attachFilesService = async (ticketId, files) => {
   const ticket = await Ticket.findById(ticketId);
   if (!ticket) throw new Error("Ticket no encontrado");
 
   const attachments = files.map((file) => ({
     filename: file.originalname,
-    path: file.path,
+    path: file.path.replace(`${process.cwd()}${path.sep}`, "").replace(/\\/g, "/"),
     mimeType: file.mimetype,
   }));
 
   ticket.attachments.push(...attachments);
   await ticket.save();
+  return ticket;
+};
+
+// Actualizar ticket (estado, prioridad, asignado, etc.)
+export const updateTicketService = async (id, userId, data) => {
+  const ticket = await Ticket.findById(id);
+  if (!ticket) throw new Error("Ticket no encontrado");
+
+  // 🔹 Si el ticket se está cerrando, asignar automáticamente closedBy y closedAt
+  if (data.status && data.status.value === "closed") {
+    ticket.closedBy = userId;
+    ticket.closedAt = new Date();
+  }
+
+  // 🔹 Actualizar campos permitidos (seguridad)
+  const allowedFields = [
+    "status",
+    "priority",
+    "impact",
+    "assignedTo",
+    "description",
+    "subject"
+  ];
+
+  for (const field of allowedFields) {
+    if (data[field] !== undefined) {
+      ticket[field] = data[field];
+    }
+  }
+
+  ticket.updatedAt = new Date();
+  await ticket.save();
 
   return ticket;
 };
 
-// 🔹 Eliminar ticket (lógicamente)
-export const deleteTicketService = async (id) => {
+// Agregar comentario o nota
+export const addUpdateToTicket = async (id, { message, attachments = [], userId }) => {
   const ticket = await Ticket.findById(id);
   if (!ticket) throw new Error("Ticket no encontrado");
 
+  const normalizedAttachments = attachments.map(a => ({
+    ...a,
+    path: a.path.replace(`${process.cwd()}${path.sep}`, "").replace(/\\/g, "/")
+  }));
+
+  ticket.updates.push({
+    author: userId,
+    message,
+    attachments: normalizedAttachments,
+    date: new Date(),
+  });
+
+  ticket.updatedAt = new Date();
+  await ticket.save();
+  return ticket;
+};
+
+// Eliminación lógica
+export const deleteTicketService = async (id) => {
+  const ticket = await Ticket.findById(id);
+  if (!ticket) throw new Error("Ticket no encontrado");
   ticket.isDeleted = true;
   ticket.deletedAt = new Date();
   await ticket.save();
-
   return { status: "success", message: "Ticket eliminado lógicamente" };
 };

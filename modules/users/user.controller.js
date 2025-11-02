@@ -1,14 +1,23 @@
 import { createLog } from "../../core/services/log.service.js";
-import { activateUserService, createUserService, deleteUserService, getAllUsers, getUserById, updateUserService } from "./user.service.js";
+import { activateUserService, createUserService, deleteUserService, getAllUsersService, getAssignableUsersService, getUserById, updateUserService } from "./user.service.js";
 
 // Obtener todos los usuarios o listar los usuarios
 export const getUsers = async (req, res) => {
   try {
-    const users = await getAllUsers();
+    const page = parseInt(req.params.page) || 1;
+    const data = await getAllUsersService(page);
+    res.json({ status: "success", ...data });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+};
+
+export const getAssignableUsers = async (req, res) => {
+  try {
+    const users = await getAssignableUsersService();
     res.json({ status: "success", users });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ status: "error", message: "Error obteniendo usuarios" });
+    res.status(500).json({ status: "error", message: error.message });
   }
 };
 
@@ -28,6 +37,7 @@ export const getUser = async (req, res) => {
 // Obtener un usuario por token
 export const getUserProfile = async (req, res) => {
   const idProfile = req.user.id
+
   try {
     const user = await getUserById(idProfile);
     if (!user) return res.status(404).json({ status: "error", message: "Usuario no encontrado" });
@@ -42,8 +52,8 @@ export const getUserProfile = async (req, res) => {
 // Crear o registrar usuarios por el agente o administrador
 export const createUser = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
-    const user = await createUserService({ name, email, password, role });
+    const { name, email, password, role,area } = req.body;
+    const user = await createUserService({ name, email, password, role, area });
     await createLog({
       user: req.user?.id,
       action: "CREAR_USUARIO",
@@ -83,7 +93,8 @@ export const createUser = async (req, res) => {
 // Actualizar usuario
 export const updateUser = async (req, res) => {
   try {
-    const updatedUser = await updateUserService(req.params.id, req.body);
+    const updatedUser = await updateUserService(req.body.id, req.body);
+
     res.json({ status: "success", user: updatedUser });
   } catch (error) {
     console.error(error);

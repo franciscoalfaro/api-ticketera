@@ -9,6 +9,7 @@ import listRoutes from './modules/list/list.routes.js'
 import assetsRoutes from './modules/assets/asset.routes.js'
 import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
 import ticketRoutes from './modules/tickets/ticket.routes.js'
+import areasRoutes from './modules/areas/area.routes.js'
 
 
 import path from 'path';
@@ -16,6 +17,7 @@ import cookieParser from 'cookie-parser';
 import { connection } from './connection/connection.js';
 
 import { seedDefaultLists } from "./seed/seedLists.js";
+import { userDefault } from './seed/seedUser.js';
 
 
 dotenv.config();
@@ -70,6 +72,9 @@ app.use('/api/assets', assetsRoutes);
 // Rutas protegidas (Ticket)
 app.use('/api/ticket', ticketRoutes);
 
+// Rutas protegidas (areas)
+app.use('/api/area', areasRoutes);
+
 // Iniciar el servidor
 const PORT = process.env.PORT;
 
@@ -77,6 +82,11 @@ const PORT = process.env.PORT;
 (async () => {
   await seedDefaultLists();
 })();
+
+(async () => {
+  await userDefault();
+})();
+
 
 
 app.listen(PORT, () => {

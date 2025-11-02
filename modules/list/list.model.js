@@ -9,10 +9,6 @@ const itemSchema = new mongoose.Schema({
         type: String,
         required: true
     },
-    color: {
-        type: String,
-        default: null
-    },
     order: {
         type: Number,
         default: 0

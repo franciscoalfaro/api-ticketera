@@ -3,6 +3,18 @@ import List from "../modules/list/list.model.js";
 export const seedDefaultLists = async () => {
   const defaultLists = [
     {
+      name: "Roles de Usuario",
+      type: "sistema",
+      description: "Roles disponibles para los usuarios del sistema",
+      items: [
+        { label: "Administrador", value: "admin" },
+        { label: "Agente", value: "agente"},
+        { label: "Cliente", value: "cliente"},
+        { label: "Invitado", value: "invitado"},
+        { label: "MDS Virtual", value: "mds_virtual"},
+      ],
+    },
+    {
       name: "Departamentos",
       type: "ticket",
       description: "Áreas de la organización que gestionan tickets",
@@ -29,9 +41,9 @@ export const seedDefaultLists = async () => {
       type: "ticket",
       description: "Grado de prioridad para resolución de tickets",
       items: [
-        { label: "Baja", value: "baja", color: "#28a745" },
-        { label: "Media", value: "media", color: "#ffc107" },
-        { label: "Alta", value: "alta", color: "#dc3545" },
+        { label: "Baja", value: "baja" },
+        { label: "Media", value: "media" },
+        { label: "Alta", value: "alta" },
       ],
     },
     {
@@ -39,10 +51,22 @@ export const seedDefaultLists = async () => {
       type: "ticket",
       description: "Estados por los que pasa un ticket",
       items: [
-        { label: "Open", value: "open", color: "#0d6efd" },
-        { label: "Pending", value: "pending", color: "#ffc107" },
-        { label: "Closed", value: "closed", color: "#198754" },
+        { label: "Abierto", value: "open" },
+        { label: "Pendiente", value: "pending" },
+        { label: "Cerrado", value: "closed" },
       ],
+    },
+    {
+      name: "Tipos de Ticket",
+      type: "ticket",
+      description: "Tipos de ticket que se pueden registrar",
+      items: [],
+    },
+    {
+      name: "Medios de Reporte",
+      type: "ticket",
+      description: "Origen desde donde se reporta un ticket",
+      items: [],
     },
   ];
 
@@ -52,9 +76,9 @@ export const seedDefaultLists = async () => {
       await List.create(listData);
       console.log(`✅ Lista creada: ${listData.name}`);
     } else {
-      console.log(`⚠️ Lista existente: ${listData.name}, se omitió.`);
+      console.log(`ℹ️ Lista existente: ${listData.name}, se omitió.`);
     }
   }
 
-  console.log("🎯 Inicialización de listas completada.");
+  console.log("✅ Inicialización de listas completada.");
 };

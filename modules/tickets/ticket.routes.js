@@ -1,32 +1,31 @@
 import { Router } from "express";
-import multer from "multer";
-import {
-  createTicket,
-  getTickets,
-  addAttachments,
-  deleteTicket,
+import { 
+  createTicket, 
+  getTickets, 
+  getMyTickets, 
+  updateTicket, 
+  addTicketUpdate, 
+  deleteTicket 
 } from "./ticket.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
 import { logAction } from "../../core/middlewares/logMiddleware.js";
+import { createUploadMiddleware } from "../../core/middlewares/uploads.js";
 
 const router = Router();
 router.use(auth);
 router.use(logAction("ticket"));
 
-
-// Configuración de subida
-const storage = multer.diskStorage({
-  destination: "uploads/tickets/",
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  },
+const uploadTickets = createUploadMiddleware({
+  folder: "tickets",
+  prefix: "ticket-",
+  allowedTypes: /jpeg|jpg|png|gif|pdf|docx|xlsx/,
 });
-const upload = multer({ storage });
 
-// Rutas
-router.post("/create", upload.array("attachments"), createTicket);
-router.get("/all", getTickets);
-router.post("/:id/attachments", upload.array("attachments"), addAttachments);
-router.delete("/:id", deleteTicket);
+router.post("/create", uploadTickets.array("attachments"), createTicket);
+router.get("/all/:page", getTickets);
+router.get("/mytickets/:page", getMyTickets);
+router.put("/update", updateTicket);
+router.post("/comment/updates", uploadTickets.array("attachments"), addTicketUpdate);
+router.delete("/delete", deleteTicket);
 
 export default router;
