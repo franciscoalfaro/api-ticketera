@@ -44,6 +44,21 @@ export const createTicket = async (req, res) => {
   }
 };
 
+export const getTicketById = async (req, res) => {
+  try {
+    const id  = req.params.id;
+    const ticket = await TicketService.getTicketByIdService(id);
+
+    if (!ticket)
+      return res.status(404).json({ status: "error", message: "Ticket no encontrado" });
+
+    res.json({ status: "success", ticket });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+};
 
 // Obtener tickets
 export const getTickets = async (req, res) => {
@@ -70,10 +85,12 @@ export const getMyTickets = async (req, res) => {
 // Actualizar ticket
 export const updateTicket = async (req, res) => {
   try {
-    const { id } = req.body;
+    const id = req.body.idTicket;
     const userId = req.user.id;
-    console.log(req.body)
+ 
     const updated = await TicketService.updateTicketService(id, userId, req.body);
+
+    console.log(updated)
     res.json({ status: "success", ticket: updated });
   } catch (error) {
     console.error(error);

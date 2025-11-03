@@ -5,7 +5,8 @@ import {
   getMyTickets, 
   updateTicket, 
   addTicketUpdate, 
-  deleteTicket 
+  deleteTicket, 
+  getTicketById
 } from "./ticket.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
 import { logAction } from "../../core/middlewares/logMiddleware.js";
@@ -27,5 +28,7 @@ router.get("/mytickets/:page", getMyTickets);
 router.put("/update", updateTicket);
 router.post("/comment/updates", uploadTickets.array("attachments"), addTicketUpdate);
 router.delete("/delete", deleteTicket);
+
+router.get("/getticket/:id", getTicketById);
 
 export default router;

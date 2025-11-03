@@ -83,6 +83,40 @@ export const getTicketsService = async (page = 1, limit = 10) => {
   };
 };
 
+export const getTicketByIdService = async (id) => {
+  const ticket = await Ticket.findById(id)
+    .populate("requester", "name email role")
+    .populate("assignedTo", "name email")
+    .populate("closedBy", "name email")
+    .lean();
+
+  if (!ticket) return null;
+
+  // 🔹 Traemos las listas necesarias
+  const lists = await List.find({
+    name: { $in: ["Estados de Ticket", "Prioridades", "Impacto", "Departamentos", "Tipos de Ticket", "Medios de Reporte"] },
+  }).lean();
+
+  // 🔹 Buscador de item por ID
+  const findItemById = (id) => {
+    for (const list of lists) {
+      const item = list.items.find((i) => i._id.toString() === id?.toString());
+      if (item) return { label: item.label, value: item.value, _id: item._id };
+    }
+    return null;
+  };
+
+  // 🔹 Enriquecer campos relacionados
+  return {
+    ...ticket,
+    status: findItemById(ticket.status),
+    priority: findItemById(ticket.priority),
+    impact: findItemById(ticket.impact),
+    department: findItemById(ticket.department),
+    type: findItemById(ticket.type),
+    source: findItemById(ticket.source),
+  };
+};
 
 
 // Obtener tickets asignados al usuario autenticado
@@ -114,25 +148,41 @@ export const attachFilesService = async (ticketId, files) => {
   return ticket;
 };
 
+
 // Actualizar ticket (estado, prioridad, asignado, etc.)
 export const updateTicketService = async (id, userId, data) => {
+  console.log(id)
   const ticket = await Ticket.findById(id);
   if (!ticket) throw new Error("Ticket no encontrado");
 
-  // 🔹 Si el ticket se está cerrando, asignar automáticamente closedBy y closedAt
-  if (data.status && data.status.value === "closed") {
+  // 🔹 Buscar el estado "closed" dentro de la lista "Estados de Ticket"
+  const estadosList = await List.findOne({ name: "Estados de Ticket" }).lean();
+  const estadoCerrado = estadosList?.items.find(i => i.value === "closed");
+
+  // 🔹 Si el estado enviado equivale a "cerrado"
+  if (data.status && estadoCerrado && data.status.toString() === estadoCerrado._id.toString()) {
     ticket.closedBy = userId;
     ticket.closedAt = new Date();
   }
 
-  // 🔹 Actualizar campos permitidos (seguridad)
+  // 🔹 Si el ticket se reabre (estado distinto a "closed"), limpiar datos de cierre
+  if (data.status && estadoCerrado && data.status.toString() !== estadoCerrado._id.toString()) {
+    ticket.closedBy = null;
+    ticket.closedAt = null;
+  }
+
+  // 🔹 Campos que pueden actualizarse
   const allowedFields = [
+    "subject",
+    "description",
+    "requester",
+    "assignedTo",
+    "department",
+    "type",
+    "source",
     "status",
     "priority",
-    "impact",
-    "assignedTo",
-    "description",
-    "subject"
+    "impact"
   ];
 
   for (const field of allowedFields) {
@@ -146,6 +196,7 @@ export const updateTicketService = async (id, userId, data) => {
 
   return ticket;
 };
+
 
 // Agregar comentario o nota
 export const addUpdateToTicket = async (id, { message, attachments = [], userId }) => {
