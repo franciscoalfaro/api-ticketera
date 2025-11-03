@@ -90,7 +90,6 @@ export const updateTicket = async (req, res) => {
  
     const updated = await TicketService.updateTicketService(id, userId, req.body);
 
-    console.log(updated)
     res.json({ status: "success", ticket: updated });
   } catch (error) {
     console.error(error);

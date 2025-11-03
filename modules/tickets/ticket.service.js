@@ -151,7 +151,7 @@ export const attachFilesService = async (ticketId, files) => {
 
 // Actualizar ticket (estado, prioridad, asignado, etc.)
 export const updateTicketService = async (id, userId, data) => {
-  console.log(id)
+
   const ticket = await Ticket.findById(id);
   if (!ticket) throw new Error("Ticket no encontrado");
 
