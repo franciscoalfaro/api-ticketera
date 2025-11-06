@@ -39,6 +39,7 @@ const ticketSchema = new mongoose.Schema({
   // Cierre y auditoría
   closedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   closedAt: { type: Date, default: Date.now },
+  // re-apertura y auditoría cuando sea reabierto el ticket se indicara el nombre y fecha de la apertura. 
 
   // Estado general
   isDeleted: { type: Boolean, default: false },

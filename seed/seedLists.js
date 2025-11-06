@@ -54,6 +54,7 @@ export const seedDefaultLists = async () => {
         { label: "Abierto", value: "open" },
         { label: "Pendiente", value: "pending" },
         { label: "Cerrado", value: "closed" },
+        { label: "Sin Asignar", value: "Unassigned"},
       ],
     },
     {
