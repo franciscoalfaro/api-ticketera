@@ -51,6 +51,21 @@ app.use(cors(corsOptions));
 
 app.use(cookieParser());
 
+app.use((req, res, next) => {
+  // Detecta la IP del cliente (soporta Nginx / proxies)
+  const ip =
+    req.headers['x-forwarded-for']?.split(',')[0] ||
+    req.socket.remoteAddress ||
+    'IP desconocida';
+
+  console.log(`[${new Date().toISOString()}] Conexión desde IP: ${ip} - Ruta: ${req.method} ${req.originalUrl}`);
+
+  // Puedes agregarla al request si la necesitas en controladores:
+  req.clientIp = ip;
+
+  next();
+});
+
 
 app.use('/uploads', express.static(path.join('uploads')));
 
@@ -77,6 +92,7 @@ app.use('/api/area', areasRoutes);
 
 // Iniciar el servidor
 const PORT = process.env.PORT;
+
 
 
 (async () => {
