@@ -45,7 +45,7 @@ export const processIncomingMail = async (mail) => {
     const defaultAgent = await getDefaultAgent();
 
     if (!defaults.department || !defaults.priority || !defaults.impact || !defaults.status) {
-      console.log("❌ Error: No se pudieron cargar los defaults desde las listas.");
+      console.log("Error: No se pudieron cargar los defaults desde las listas.");
       return;
     }
 
@@ -58,23 +58,23 @@ export const processIncomingMail = async (mail) => {
     // 🔹 Si no existe, crear usuario CLIENTE (local, sin clave)
     // ==========================
     if (!requester) {
-      console.log(`🟦 Creando usuario Cliente LOCAL para: ${from}`);
+      console.log(`Creando usuario Cliente LOCAL para: ${from}`);
 
       const rolesList = await List.findOne({ name: "Roles de Usuario" }).lean();
       const clientRole = rolesList?.items?.find(r => r.value === "cliente");
 
       if (!clientRole) {
-        console.log("❌ No existe el rol Cliente en la lista Roles de Usuario.");
+        console.log("No existe el rol Cliente en la lista Roles de Usuario.");
         return;
       }
 
       const newUser = await User.create({
-        name: from.split("@")[0], // ejemplo “francisco”
+        name: from.split("@")[0], 
         email: from,
-        password: null,           // ❗ NO usa clave
-        role: clientRole._id,     // _id del item “Cliente”
+        password: null,           
+        role: clientRole._id,     
         area: null,
-        type: "local",            // ❗ SIEMPRE LOCAL
+        type: "local",           
         isDeleted: false
       });
 
@@ -108,7 +108,7 @@ export const processIncomingMail = async (mail) => {
       attachments: attachments.map(a => a.name),
     });
 
-    console.log(`🆕 Nuevo ticket creado: ${newTicket.code} desde ${from}`);
+    console.log(`Nuevo ticket creado: ${newTicket.code} desde ${from}`);
 
   } catch (error) {
     console.error("Error al procesar correo:", error.message);
