@@ -1,11 +1,13 @@
 import User from "../users/user.model.js";
+
 import bcrypt from "bcrypt";
 import { createToken, createRefreshToken } from "../../core/services/jwt.js";
 import { addToBlacklist } from '../../core/services/tokenBlacklist.js';
+import List from "../list/list.model.js";
 
 export const loginService = async (email, password) => {
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).lean();
 
     if (!user) {
       return { status: 404, message: "Usuario no encontrado" };
@@ -15,12 +17,10 @@ export const loginService = async (email, password) => {
       return { status: 403, message: "Tu cuenta ha sido desactivada" };
     }
 
-    // 🔹 Si el usuario es de tipo Microsoft, no puede loguearse con contraseña
     if (user.type === "microsoft") {
       return { status: 400, message: "Debes iniciar sesión con tu cuenta de Microsoft" };
     }
 
-    // 🔹 Si el usuario no tiene contraseña (ej. importado desde Microsoft)
     if (!user.password) {
       return { status: 400, message: "Este usuario fue creado mediante Microsoft, usa ese método de inicio" };
     }
@@ -30,7 +30,20 @@ export const loginService = async (email, password) => {
       return { status: 401, message: "Contraseña incorrecta" };
     }
 
-    // 🔹 Generar tokens JWT
+    // =============================
+    // 🔹 Popular role desde lista
+    // =============================
+    const roleList = await List.findOne({ name: "Roles de Usuario" }).lean();
+
+    let roleEnriched = null;
+
+    if (roleList) {
+      roleEnriched = roleList.items.find(
+        (item) => item._id.toString() === user.role?.toString()
+      );
+    }
+
+    // 🔹 Tokens JWT
     const accessToken = createToken(user);
     const refreshToken = createRefreshToken(user);
 
@@ -40,11 +53,12 @@ export const loginService = async (email, password) => {
         id: user._id,
         email: user.email,
         name: user.name,
-        role: user.role
+        role: roleEnriched.value    // ← Aquí viene enriquecido
       },
       accessToken,
       refreshToken
     };
+
   } catch (error) {
     console.error("Error en loginService:", error);
     return { status: 500, message: "Error interno en el servicio de autenticación" };
