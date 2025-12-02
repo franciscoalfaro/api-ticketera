@@ -1,15 +1,11 @@
-import { Router } from "express";
-import { processUnreadEmails } from "./mail.listener.js";
+import express from "express";
+import { obtenerMails } from "./mail.controller.js";
+import { logAction } from "../../core/middlewares/logMiddleware.js";
 
-const router = Router();
+const router = express.Router();
 
-router.get("/fetch", async (req, res) => {
-  try {
-    await processUnreadEmails();
-    res.json({ status: "success", message: "Correos procesados" });
-  } catch (error) {
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
+router.use(logAction("mail-processor"));
+
+router.get("/fetch",obtenerMails)
 
 export default router;
