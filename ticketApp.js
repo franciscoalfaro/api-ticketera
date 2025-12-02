@@ -11,6 +11,9 @@ import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
 import ticketRoutes from './modules/tickets/ticket.routes.js'
 import areasRoutes from './modules/areas/area.routes.js'
 
+import mailRoutes from './modules/mail-processor/mail.routes.js'
+
+
 
 import path from 'path';
 import cookieParser from 'cookie-parser';
@@ -89,6 +92,9 @@ app.use('/api/ticket', ticketRoutes);
 
 // Rutas protegidas (areas)
 app.use('/api/area', areasRoutes);
+
+// Rutas públicas (Auth)
+app.use('/api/getemail', mailRoutes);
 
 // Iniciar el servidor
 const PORT = process.env.PORT;

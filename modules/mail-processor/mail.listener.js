@@ -1,40 +1,21 @@
-import { Client } from "@microsoft/microsoft-graph-client";
-import "isomorphic-fetch";
+import { fetchSupportEmails, markAsRead } from "./mail.utils.js";
 import { processIncomingMail } from "./mail.service.js";
 
-const GRAPH_SCOPE = ["Mail.Read", "Mail.ReadBasic.All"];
-let graphClient = null;
-
-// Inicializar cliente Graph
-export const initGraphClient = (accessToken) => {
-  graphClient = Client.init({
-    authProvider: (done) => done(null, accessToken),
-  });
-  return graphClient;
-};
-
-// Leer correos nuevos desde la bandeja
-export const fetchUnreadEmails = async (accessToken) => {
+export const processUnreadEmails = async () => {
   try {
-    const client = initGraphClient(accessToken);
+    const mails = await fetchSupportEmails();
 
-    const messages = await client
-      .api("/me/mailFolders/Inbox/messages")
-      .filter("isRead eq false")
-      .top(10)
-      .get();
-
-    if (!messages.value.length) {
+    if (!mails.length) {
       console.log("📭 No hay correos nuevos.");
       return;
     }
 
-    for (const msg of messages.value) {
-      await processIncomingMail(msg);
-      // Marcar como leído para no volver a procesar
-      await client.api(`/me/messages/${msg.id}`).update({ isRead: true });
+    for (const mail of mails) {
+      await processIncomingMail(mail);
+      await markAsRead(mail.id);
     }
+
   } catch (err) {
-    console.error("❌ Error al obtener correos:", err.message);
+    console.error("❌ Error al leer correos:", err.message);
   }
 };

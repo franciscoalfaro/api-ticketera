@@ -1,5 +1,10 @@
+import cron from "node-cron";
 import { processIncomingEmails } from "./mail.service.js";
 
-setInterval(() => {
-  processIncomingEmails().catch(err => console.error("Error procesando correos:", err));
-}, 60 * 1000); // cada 1 minuto
+cron.schedule("* * * * *", async () => {
+  try {
+    await processIncomingEmails();
+  } catch (err) {
+    console.error("Error procesando correos:", err);
+  }
+});

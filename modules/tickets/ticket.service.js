@@ -1,5 +1,6 @@
 import Ticket from "./ticket.model.js";
 import List from "../list/list.model.js";
+import User from "../users/user.model.js";
 import path from "path";
 
 // Generar correlativo automático
@@ -228,4 +229,32 @@ export const deleteTicketService = async (id) => {
   ticket.deletedAt = new Date();
   await ticket.save();
   return { status: "success", message: "Ticket eliminado lógicamente" };
+};
+
+
+export const getDefaultLists = async () => {
+  const getItem = async (listName, itemValue) => {
+    const list = await List.findOne(
+      { name: listName, isDeleted: false },
+      { items: 1 }
+    );
+    if (!list) return null;
+
+    const item = list.items.find(i => i.value === itemValue);
+    return item ? item._id : null;
+  };
+
+  return {
+    department: await getItem("Departamentos", "soporte_ti"),
+    priority: await getItem("Prioridades", "media"),
+    impact: await getItem("Impacto", "persona"),
+    status: await getItem("Estados de Ticket", "open"),
+    type: await getItem("Tipos de Ticket", "incidente"), // asegúrate de agregarlo
+  };
+};
+
+export const getDefaultAgent = async () => {
+  // Busca el usuario que configuraste en tu seed:
+  // "MDS Virtual", value: "mds_virtual"
+  return await User.findOne({ email: "mds_admin@ticketera.local", isDeleted: false });
 };

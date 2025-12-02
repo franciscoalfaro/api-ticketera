@@ -10,21 +10,33 @@ const credential = new ClientSecretCredential(
 
 export const getGraphClient = async () => {
   const token = await credential.getToken("https://graph.microsoft.com/.default");
+
   return Client.init({
     authProvider: (done) => done(null, token.token),
   });
 };
 
+// Leer bandeja del correo soporte
 export const fetchSupportEmails = async () => {
   const client = await getGraphClient();
-  const mailbox = process.env.SUPPORT_MAILBOX;
+  const mailbox = process.env.SUPPORT_MAILBOX; // soporte@tudominio.cl
 
-  const messages = await client
+  const response = await client
     .api(`/users/${mailbox}/mailFolders/Inbox/messages`)
     .filter("isRead eq false")
+    .orderby("receivedDateTime DESC")
     .top(10)
     .get();
 
-  console.log("📩 Correos no leídos:", messages.value.length);
-  return messages.value;
+  return response.value;
+};
+
+// Marcar correo como leído
+export const markAsRead = async (messageId) => {
+  const client = await getGraphClient();
+  const mailbox = process.env.SUPPORT_MAILBOX;
+
+  await client
+    .api(`/users/${mailbox}/messages/${messageId}`)
+    .update({ isRead: true });
 };
