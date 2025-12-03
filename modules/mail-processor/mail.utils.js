@@ -1,3 +1,4 @@
+// modules/mail-processor/mail.utils.js
 import { Client } from "@microsoft/microsoft-graph-client";
 import { ClientSecretCredential } from "@azure/identity";
 import "isomorphic-fetch";
@@ -16,10 +17,12 @@ export const getGraphClient = async () => {
   });
 };
 
-// Leer bandeja del correo soporte
+// ==========================
+// 🔹 Leer bandeja soporte
+// ==========================
 export const fetchSupportEmails = async () => {
   const client = await getGraphClient();
-  const mailbox = process.env.SUPPORT_MAILBOX; // soporte@tudominio.cl
+  const mailbox = process.env.SUPPORT_MAILBOX;
 
   const response = await client
     .api(`/users/${mailbox}/mailFolders/Inbox/messages`)
@@ -31,12 +34,57 @@ export const fetchSupportEmails = async () => {
   return response.value;
 };
 
-// Marcar correo como leído
+// ==========================
+// 🔹 Marcar correo como leído
+// ==========================
 export const markAsRead = async (messageId) => {
   const client = await getGraphClient();
   const mailbox = process.env.SUPPORT_MAILBOX;
 
-  await client
-    .api(`/users/${mailbox}/messages/${messageId}`)
-    .update({ isRead: true });
+  await client.api(`/users/${mailbox}/messages/${messageId}`).update({
+    isRead: true,
+  });
+};
+
+// ==========================
+// 🔹 Enviar respuesta automática
+// ==========================
+export const sendTicketResponseEmail = async ({
+  to,
+  ticketCode,
+  subject,
+  message,
+}) => {
+  const client = await getGraphClient();
+  const mailbox = process.env.SUPPORT_MAILBOX;
+
+  const email = {
+    message: {
+      subject: subject || `Ticket creado correctamente (${ticketCode})`,
+      body: {
+        contentType: "HTML",
+        content: `
+          <p>Hola,</p>
+          <p>Tu ticket ha sido registrado correctamente.</p>
+          <p><strong>Código del Ticket:</strong> ${ticketCode}</p>
+          <p><strong>Descripción:</strong> ${message}</p>
+          <br>
+          <hr>
+          <p>Saludos,<br>Equipo de Soporte</p>
+        `,
+      },
+      toRecipients: [
+        {
+          emailAddress: { address: to },
+        },
+      ],
+      from: {
+        emailAddress: { address: mailbox },
+      },
+    },
+    saveToSentItems: true,
+  };
+
+  await client.api(`/users/${mailbox}/sendMail`).post(email);
+  console.log(`📨 Respuesta enviada a ${to} por ticket ${ticketCode}`);
 };
