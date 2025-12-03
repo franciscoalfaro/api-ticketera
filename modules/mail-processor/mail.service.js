@@ -1,4 +1,5 @@
 // modules/mail-processor/mail.service.js
+
 import Ticket from "../tickets/ticket.model.js";
 import User from "../users/user.model.js";
 import List from "../list/list.model.js";
@@ -12,6 +13,9 @@ import {
   fetchSupportEmails,
   markAsRead,
   sendTicketResponseEmail,
+  processInlineImages,
+  replaceCidImages,
+  processRegularAttachments,
 } from "./mail.utils.js";
 
 const ALLOWED_DOMAINS = ["@hotmail.cl", "@gmail.com", "@franciscoalfaro.cl"];
@@ -23,7 +27,7 @@ export const processIncomingMail = async (mail) => {
   try {
     const from = mail.from?.emailAddress?.address || null;
     const subject = mail.subject || "Sin asunto";
-    const body = mail.body?.content || "";
+    const rawHtml = mail.body?.content || "";
     const attachments = mail.attachments || [];
 
     if (!from) return;
@@ -33,31 +37,57 @@ export const processIncomingMail = async (mail) => {
       return;
     }
 
-    // Verificar correlativo en headers
+    // =====================================================
+    // 🔹 1. PROCESAR IMÁGENES INLINE (cid)
+    // =====================================================
+    const cidMap = await processInlineImages(attachments);
+    const processedHtml = replaceCidImages(rawHtml, cidMap);
+
+    // =====================================================
+    // 🔹 2. PROCESAR ADJUNTOS NORMALES
+    // =====================================================
+    const regularFiles = await processRegularAttachments(attachments);
+
+    // =====================================================
+    // 🔹 3. DETECTAR CORRELATIVO
+    // =====================================================
     const headers = mail.internetMessageHeaders || [];
     const headerTicket = headers.find((h) => h.name === "X-Ticket-ID")?.value;
     const matchSubject = subject.match(/TCK-\d{4}/);
+
     const ticketCode = headerTicket || (matchSubject ? matchSubject[0] : null);
 
-    // =======================
-    // 🔹 Actualizar ticket
-    // =======================
+    // =====================================================
+    // 🔹 4. SI EXISTE TICKET → ACTUALIZAR
+    // =====================================================
     if (ticketCode) {
       const ticket = await Ticket.findOne({ code: ticketCode });
 
       if (ticket) {
-        ticket.description += `\n\n---\nRespuesta de ${from}:\n${body}`;
+        ticket.description += `
+<hr/>
+<b>Respuesta de ${from}:</b><br/>
+${processedHtml}
+<hr/>`;
+
+        // Agregar adjuntos nuevos
+        if (regularFiles.length > 0) {
+          ticket.attachments.push(...regularFiles);
+        }
+
         ticket.updatedAt = new Date();
         await ticket.save();
+
+        ticket.isUpdate = true;
 
         console.log(`✉️ Ticket ${ticketCode} actualizado`);
         return ticket;
       }
     }
 
-    // =======================
-    // 🔹 Crear ticket nuevo
-    // =======================
+    // =====================================================
+    // 🔹 5. SI NO EXISTE → CREAR TICKET NUEVO
+    // =====================================================
     const defaults = await getDefaultLists();
     const defaultAgent = await getDefaultAgent();
 
@@ -65,7 +95,7 @@ export const processIncomingMail = async (mail) => {
 
     if (!requester) {
       const rolesList = await List.findOne({ name: "Roles de Usuario" }).lean();
-      const clientRole = rolesList?.items?.find((r) => r.value === "cliente");
+      const clientRole = rolesList.items.find((i) => i.value === "cliente");
 
       const newUser = await User.create({
         name: from.split("@")[0],
@@ -79,11 +109,11 @@ export const processIncomingMail = async (mail) => {
     }
 
     const sourceList = await List.findOne({ name: "Medios de Reporte" }).lean();
-    const emailSource = sourceList?.items?.find((i) => i.value === "email");
+    const emailSource = sourceList.items.find((i) => i.value === "email");
 
     const newTicket = await createTicketService({
       subject,
-      description: body,
+      description: processedHtml,
       requester: requester._id,
       department: defaults.department,
       priority: defaults.priority,
@@ -92,19 +122,21 @@ export const processIncomingMail = async (mail) => {
       status: defaults.status,
       source: emailSource._id,
       assignedTo: defaultAgent ? defaultAgent._id : null,
-      attachments: attachments.map((a) => a.name),
+      attachments: regularFiles, // 🔥 Adjuntos normales incluidos
     });
 
     console.log(`🎫 Ticket creado: ${newTicket.code}`);
 
+    newTicket.isUpdate = false;
     return newTicket;
+
   } catch (error) {
-    console.error("Error procesando correo:", error);
+    console.error("❌ Error procesando correo:", error);
   }
 };
 
 // =====================================================
-// 🔹 Procesar TODOS los correos no leídos
+// 🔹 PROCESAR TODOS LOS CORREOS
 // =====================================================
 export const processIncomingEmails = async () => {
   const emails = await fetchSupportEmails();
@@ -112,16 +144,13 @@ export const processIncomingEmails = async () => {
   for (const mail of emails) {
     const ticket = await processIncomingMail(mail);
 
-    if (ticket) {
-      // Enviar respuesta automática solo SI es ticket nuevo
-      if (!ticket.isUpdate) {
-        await sendTicketResponseEmail({
-          to: mail.from.emailAddress.address,
-          ticketCode: ticket.code,
-          subject: "Tu ticket ha sido creado",
-          message: ticket.description,
-        });
-      }
+    if (ticket && !ticket.isUpdate) {
+      await sendTicketResponseEmail({
+        to: mail.from.emailAddress.address,
+        ticketCode: ticket.code,
+        subject: "Tu ticket ha sido creado",
+        message: ticket.description,
+      });
     }
 
     await markAsRead(mail.id);
