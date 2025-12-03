@@ -50,6 +50,9 @@ importers:
       multer:
         specifier: ^2.0.2
         version: 2.0.2
+      node-cron:
+        specifier: ^4.2.1
+        version: 4.2.1
       nodemailer:
         specifier: ^7.0.6
         version: 7.0.6
@@ -592,6 +595,10 @@ packages:
   node-addon-api@8.5.0:
     resolution: {integrity: sha512-/bRZty2mXUIFY/xU5HLvveNHlswNJej+RnxBjOMkidWfwZzgTbPG1E3K5TOxRLOR+5hX7bSofy8yf1hZevMS8A==}
     engines: {node: ^18 || ^20 || >= 21}
+
+  node-cron@4.2.1:
+    resolution: {integrity: sha512-lgimEHPE/QDgFlywTd8yTR61ptugX3Qer29efeyWw2rv259HtGBNn1vZVmp8lB9uo9wC0t/AT4iGqXxia+CJFg==}
+    engines: {node: '>=6.0.0'}
 
   node-fetch@2.7.0:
     resolution: {integrity: sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==}
@@ -1409,6 +1416,8 @@ snapshots:
   negotiator@1.0.0: {}
 
   node-addon-api@8.5.0: {}
+
+  node-cron@4.2.1: {}
 
   node-fetch@2.7.0:
     dependencies:

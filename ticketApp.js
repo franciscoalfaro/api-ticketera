@@ -1,116 +1,132 @@
-// app.js
+// ticketApp.js
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-
-import authRoutes from './modules/auth/auth.routes.js';
-import userRoutes from './modules/users/user.routes.js';
-import listRoutes from './modules/list/list.routes.js'
-import assetsRoutes from './modules/assets/asset.routes.js'
-import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
-import ticketRoutes from './modules/tickets/ticket.routes.js'
-import areasRoutes from './modules/areas/area.routes.js'
-
-import mailRoutes from './modules/mail-processor/mail.routes.js'
-
-
-
 import path from 'path';
 import cookieParser from 'cookie-parser';
+import cron from 'node-cron';
+
+// Conexión a BD
 import { connection } from './connection/connection.js';
 
+// Seeds
 import { seedDefaultLists } from "./seed/seedLists.js";
 import { userDefault } from './seed/seedUser.js';
+
+// Rutas
+import authRoutes from './modules/auth/auth.routes.js';
+import userRoutes from './modules/users/user.routes.js';
+import listRoutes from './modules/list/list.routes.js';
+import assetsRoutes from './modules/assets/asset.routes.js';
+import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
+import ticketRoutes from './modules/tickets/ticket.routes.js';
+import areasRoutes from './modules/areas/area.routes.js';
+import mailRoutes from './modules/mail-processor/mail.routes.js';
+
+import { processUnreadEmails } from './modules/mail-processor/mail.listener.js';
+
+// Servicio de correos
 
 
 dotenv.config();
 
-// efectuar conexion a BD
+// ==============================
+// 🔹 CONEXIÓN A BD
+// ==============================
 connection();
 
+// ==============================
+// 🔹 APP EXPRESS
+// ==============================
 const app = express();
 
 app.use(express.json());
-app.use(express.urlencoded({extended:true}));
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
-
-
-const allowedOrigins = ['http://localhost:3000/' ,'http://localhost:3000','http://localhost:3001/'];
+// ==============================
+// 🔹 CORS CONFIG
+// ==============================
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:3001'
+];
 
 const corsOptions = {
   origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-          callback(null, true); // Permitir acceso
-      } else {
-          callback(new Error('Origen no permitido por CORS'));
-      }
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Origen no permitido por CORS'));
+    }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],  // Asegúrate de permitir OPTIONS
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
 };
 
-//configurar cors
 app.use(cors(corsOptions));
 
-app.use(cookieParser());
-
+// ==============================
+// 🔹 LOG DE IPs
+// ==============================
 app.use((req, res, next) => {
-  // Detecta la IP del cliente (soporta Nginx / proxies)
   const ip =
     req.headers['x-forwarded-for']?.split(',')[0] ||
     req.socket.remoteAddress ||
     'IP desconocida';
 
-  console.log(`[${new Date().toISOString()}] Conexión desde IP: ${ip} - Ruta: ${req.method} ${req.originalUrl}`);
+  console.log(`[${new Date().toISOString()}] IP: ${ip} - ${req.method} ${req.originalUrl}`);
 
-  // Puedes agregarla al request si la necesitas en controladores:
   req.clientIp = ip;
-
   next();
 });
 
-
+// ==============================
+// 🔹 STATIC FILES
+// ==============================
 app.use('/uploads', express.static(path.join('uploads')));
 
-
-// Rutas públicas (Auth)
+// ==============================
+// 🔹 Rutas
+// ==============================
 app.use('/api/auth', authRoutes);
-// Rutas públicas Microsoft (Auth)
-app.use('/api/microsoft',microsoftRoutes );
-
-// Rutas protegidas (Users)
+app.use('/api/microsoft', microsoftRoutes);
 app.use('/api/users', userRoutes);
-
-// Rutas protegidas (listas)
 app.use('/api/option', listRoutes);
-
-// Rutas protegidas (Assets)
 app.use('/api/assets', assetsRoutes);
-
-// Rutas protegidas (Ticket)
 app.use('/api/ticket', ticketRoutes);
-
-// Rutas protegidas (areas)
 app.use('/api/area', areasRoutes);
-
-// Rutas públicas (Auth)
 app.use('/api/getemail', mailRoutes);
 
-// Iniciar el servidor
-const PORT = process.env.PORT;
-
-
-
+// ==============================
+// 🔹 Seeds iniciales
+// ==============================
 (async () => {
   await seedDefaultLists();
-})();
-
-(async () => {
   await userDefault();
 })();
 
+// ==============================
+// 🔹 CRON (procesador de correos)
+// ==============================
+cron.schedule('* * * * *', async () => {
+  try {
+    console.log('⏳ Buscando correos entrantes...');
+    await processUnreadEmails();
+    console.log('✔️ Correos procesados');
+  } catch (error) {
+    console.error("❌ Error procesando correos:", error);
+  }
+}, {
+  timezone: 'America/Santiago'
+});
 
+console.log('⏰ Scheduler de correo activo (cada 1 minuto).');
 
+// ==============================
+// 🔹 Iniciar servidor
+// ==============================
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Servidor en puerto ${PORT}`);
+  console.log(`🚀 Servidor en puerto ${PORT}`);
 });
