@@ -16,10 +16,7 @@ const router = Router();
 router.use(auth);
 router.use(logAction("ticket"));
 
-const uploadTickets = createUploadMiddleware({
-  folder: "tickets",
-  prefix: "ticket-",
-  allowedTypes: /jpeg|jpg|png|gif|pdf|docx|xlsx/,
+const uploadTickets = createUploadMiddleware({ folder: "tickets", prefix: "ticket-", allowedTypes: /jpeg|jpg|png|gif|pdf|docx|xlsx/,
 });
 
 router.post("/create", uploadTickets.array("attachments"), createTicket);

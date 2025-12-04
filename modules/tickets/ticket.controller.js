@@ -1,3 +1,4 @@
+import List from "../list/list.model.js";
 import * as TicketService from "./ticket.service.js";
 
 // Crear ticket
@@ -16,13 +17,40 @@ export const createTicket = async (req, res) => {
       impact
     } = req.body;
 
-    const attachments =
-      req.files?.map(f => ({
-        filename: f.originalname,
-        path: f.path,
-        mimeType: f.mimetype,
-      })) || [];
+    // =====================================================
+    // 🔹 1. Adjuntos con Multer
+    // =====================================================
+    const attachments = req.files?.map(f => ({
+      filename: f.filename,
+      path: `/uploads/tickets/${f.filename}`,
+      url: `/uploads/tickets/${f.filename}`,
+      mimeType: f.mimetype,
+    })) || [];
 
+    // =====================================================
+    // 🔹 2. Si no viene status → buscar "Pendiente"
+    // =====================================================
+    let statusId = status;
+
+    if (!statusId) {
+      const statusList = await List.findOne({ name: "Estados de Ticket" }).lean();
+
+      if (!statusList) {
+        throw new Error("No se encontró la lista 'Estados de Ticket'");
+      }
+
+      const pending = statusList.items.find(i => i.value === "pending");
+
+      if (!pending) {
+        throw new Error("No se encontró el estado 'Pendiente'");
+      }
+
+      statusId = pending._id; // 👈 aquí asignamos su ObjectId real
+    }
+
+    // =====================================================
+    // 🔹 3. Crear ticket con status correcto
+    // =====================================================
     const ticket = await TicketService.createTicketService({
       subject,
       description,
@@ -31,22 +59,25 @@ export const createTicket = async (req, res) => {
       department,
       type,
       source,
-      status,
+      status: statusId,
       priority,
       impact,
       attachments,
     });
 
     res.status(201).json({ status: "success", ticket });
+
   } catch (error) {
     console.error(error);
     res.status(400).json({ status: "error", message: error.message });
   }
 };
 
+
+
 export const getTicketById = async (req, res) => {
   try {
-    const id  = req.params.id;
+    const id = req.params.id;
     const ticket = await TicketService.getTicketByIdService(id);
 
     if (!ticket)
@@ -87,7 +118,7 @@ export const updateTicket = async (req, res) => {
   try {
     const id = req.body.idTicket;
     const userId = req.user.id;
- 
+
     const updated = await TicketService.updateTicketService(id, userId, req.body);
 
     res.json({ status: "success", ticket: updated });
