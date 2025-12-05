@@ -258,3 +258,34 @@ export const getDefaultAgent = async () => {
   // "MDS Virtual", value: "mds_virtual"
   return await User.findOne({ email: "mds_admin@ticketera.local", isDeleted: false });
 };
+
+
+// 📌 Obtener resumen de actualizaciones
+export const getUpdatesSummaryService = async (ticketId) => {
+  const ticket = await Ticket.findById(ticketId)
+    .select("updates")
+    .populate("updates.author", "name email")
+    .lean();
+
+  if (!ticket) return null;
+
+  return ticket.updates.map(u => ({
+    id: u._id,
+    date: u.date,
+    author: u.author,
+  }));
+};
+
+// 📌 Obtener una actualización completa por updateId
+export const getUpdateByIdService = async (updateId) => {
+  const ticket = await Ticket.findOne(
+    { "updates._id": updateId },
+    { "updates.$": 1 }
+  )
+    .populate("updates.author", "name email")
+    .lean();
+
+  if (!ticket) return null;
+
+  return ticket.updates[0];
+};

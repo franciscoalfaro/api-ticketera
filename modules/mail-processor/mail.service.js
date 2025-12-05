@@ -37,20 +37,14 @@ export const processIncomingMail = async (mail) => {
       return;
     }
 
-    // =====================================================
-    // 🔹 1. PROCESAR IMÁGENES INLINE (cid)
-    // =====================================================
+    // 1. Procesar imágenes inline (cid)
     const cidMap = await processInlineImages(attachments);
     const processedHtml = replaceCidImages(rawHtml, cidMap);
 
-    // =====================================================
-    // 🔹 2. PROCESAR ADJUNTOS NORMALES
-    // =====================================================
+    // 2. Procesar adjuntos normales
     const regularFiles = await processRegularAttachments(attachments);
 
-    // =====================================================
-    // 🔹 3. DETECTAR CORRELATIVO
-    // =====================================================
+    // 3. Detectar correlativo
     const headers = mail.internetMessageHeaders || [];
     const headerTicket = headers.find((h) => h.name === "X-Ticket-ID")?.value;
     const matchSubject = subject.match(/TCK-\d{4}/);
@@ -64,23 +58,33 @@ export const processIncomingMail = async (mail) => {
       const ticket = await Ticket.findOne({ code: ticketCode });
 
       if (ticket) {
-        ticket.description += `
-<hr/>
-<b>Respuesta de ${from}:</b><br/>
-${processedHtml}
-<hr/>`;
 
-        // Agregar adjuntos nuevos
-        if (regularFiles.length > 0) {
-          ticket.attachments.push(...regularFiles);
+        // Buscar autor
+        let requester = await User.findOne({ email: from }).lean();
+
+        if (!requester) {
+          const newUser = await User.create({
+            name: from.split("@")[0],
+            email: from,
+            password: null,
+            type: "local",
+          });
+          requester = newUser.toObject();
         }
+
+        // Registrar update
+        ticket.updates.push({
+          message: processedHtml,
+          author: requester._id,
+          attachments: regularFiles,
+          date: new Date(),
+        });
 
         ticket.updatedAt = new Date();
         await ticket.save();
 
-        ticket.isUpdate = true;
-
         console.log(`✉️ Ticket ${ticketCode} actualizado`);
+        ticket.isUpdate = true;
         return ticket;
       }
     }
@@ -122,10 +126,32 @@ ${processedHtml}
       status: defaults.status,
       source: emailSource._id,
       assignedTo: defaultAgent ? defaultAgent._id : null,
-      attachments: regularFiles, // 🔥 Adjuntos normales incluidos
+      attachments: regularFiles,
     });
 
+    // Primer update
+    newTicket.updates.push({
+      message: processedHtml,
+      author: requester._id,
+      attachments: regularFiles,
+      date: new Date(),
+    });
+
+    await newTicket.save();
+
     console.log(`🎫 Ticket creado: ${newTicket.code}`);
+
+    await sendTicketResponseEmail({
+      to: from,
+      ticketCode: newTicket.code,
+      subject,
+      message: `
+        Se ha creado tu ticket correctamente.<br/>
+        Puedes responder a este correo para continuar la conversación.<br/><br/>
+        <b>Resumen:</b><br/>
+        ${processedHtml}
+      `,
+    });
 
     newTicket.isUpdate = false;
     return newTicket;
@@ -134,6 +160,7 @@ ${processedHtml}
     console.error("❌ Error procesando correo:", error);
   }
 };
+
 
 // =====================================================
 // 🔹 PROCESAR TODOS LOS CORREOS

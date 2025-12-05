@@ -156,3 +156,38 @@ export const deleteTicket = async (req, res) => {
     res.status(500).json({ status: "error", message: error.message });
   }
 };
+
+
+export const getUpdatesSummary = async (req, res) => {
+  try {
+    const result = await TicketService.getUpdatesSummaryService(req.params.id);
+
+    if (!result) {
+      return res.status(404).json({ status: "error", message: "Ticket no encontrado" });
+    }
+
+    return res.json({ status: "success", updates: result });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ status: "error", message: error.message });
+  }
+};
+
+// 📌 Una actualización
+export const getUpdateById = async (req, res) => {
+  try {
+    const update = await TicketService.getUpdateByIdService(req.params.updateId);
+
+    if (!update) {
+      return res.status(404).json({ status: "error", message: "Actualización no encontrada" });
+    }
+
+    return res.json({ status: "success", update });
+
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ status: "error", message: error.message });
+  }
+};
+

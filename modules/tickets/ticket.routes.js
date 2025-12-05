@@ -6,7 +6,9 @@ import {
   updateTicket, 
   addTicketUpdate, 
   deleteTicket, 
-  getTicketById
+  getTicketById,
+  getUpdatesSummary,
+  getUpdateById
 } from "./ticket.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
 import { logAction } from "../../core/middlewares/logMiddleware.js";
@@ -26,6 +28,11 @@ router.put("/update", updateTicket);
 router.post("/comment/updates", uploadTickets.array("attachments"), addTicketUpdate);
 router.delete("/delete", deleteTicket);
 
+
 router.get("/getticket/:id", getTicketById);
+
+
+router.get("/:id/updates/summary", getUpdatesSummary);
+router.get("/update/:updateId", getUpdateById);
 
 export default router;

@@ -156,32 +156,83 @@ export const sendTicketResponseEmail = async ({
   const client = await getGraphClient();
   const mailbox = process.env.SUPPORT_MAILBOX;
 
-  const email = {
+  // =============================
+  //  HTML FINAL DEL CORREO
+  // =============================
+  const htmlContent = `
+  <div style="font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f7; padding: 20px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 650px; margin: auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e2e2;">
+      <!-- HEADER -->
+      <tr>
+        <td style="background: #111827; padding: 25px 20px; text-align: center;">
+          <img src="https://franciscoalfaro.cl/logo.png" alt="Logo" style="width: 120px; margin-bottom: 8px;" />
+          <h2 style="color: #ffffff; margin: 0; font-size: 20px;">Ticketera - Sistema de Soporte</h2>
+        </td>
+      </tr>
+
+      <!-- BODY -->
+      <tr>
+        <td style="padding: 30px 35px; color: #333333;">
+          <h2 style="margin-top: 0; color: #111827;">✔ Ticket creado correctamente</h2>
+
+          <p>Hola,</p>
+          <p>Tu solicitud ha sido registrada exitosamente en nuestro sistema de soporte.</p>
+
+          <div style="background: #f3f4f6; padding: 15px; border-left: 4px solid #2563eb; margin: 25px 0; border-radius: 6px;">
+            <p style="margin: 0;"><strong>Código del Ticket:</strong> <span style="color: #2563eb; font-weight: bold;">${ticketCode}</span></p>
+            <p style="margin: 6px 0 0;"><strong>Asunto:</strong> ${subject}</p>
+          </div>
+
+          <h3 style="margin-bottom: 8px; color: #111827;">📄 Descripción enviada</h3>
+          <div style="padding: 15px; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb;">
+            ${message}
+          </div>
+
+          <p style="margin-top: 20px;">
+            Puedes responder directamente a este correo para continuar con el seguimiento del ticket.
+          </p>
+
+          <hr style="border: none; height: 1px; background: #e5e7eb; margin: 30px 0;" />
+
+          <p style="font-size: 14px; color: #555;">
+            Atentamente,<br />
+            <strong>Equipo de Soporte</strong><br />
+            Ticketera • franciscoalfaro.cl
+          </p>
+        </td>
+      </tr>
+
+      <!-- FOOTER -->
+      <tr>
+        <td style="background: #111827; padding: 15px; text-align: center;">
+          <p style="color: #ffffff; font-size: 12px; margin: 0;">
+            © ${new Date().getFullYear()} Ticketera — Todos los derechos reservados.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </div>
+  `;
+
+  // =============================
+  // 🔥 ENVÍO REAL DEL CORREO
+  // =============================
+  await client.api(`/users/${mailbox}/sendMail`).post({
     message: {
       subject: `[${ticketCode}] ${subject || "Ticket creado"}`,
       body: {
         contentType: "HTML",
-        content: `
-          <p>Hola,</p>
-          <p>Tu ticket ha sido registrado correctamente.</p>
-          <p><strong>Código del Ticket:</strong> ${ticketCode}</p>
-          <p>${message}</p>
-          <hr/>
-          <p><em>Responde este correo para continuar con el seguimiento.</em></p>
-        `,
+        content: htmlContent, // 👈 ESTE ES EL CORRECTO
       },
       toRecipients: [{ emailAddress: { address: to } }],
       from: { emailAddress: { address: mailbox } },
-
-      // 🔥 Cabecera especial para correlativo
       internetMessageHeaders: [
         { name: "X-Ticket-ID", value: ticketCode },
       ],
     },
     saveToSentItems: true,
-  };
-
-  await client.api(`/users/${mailbox}/sendMail`).post(email);
+  });
 
   console.log(`📨 Respuesta enviada a ${to} por ticket ${ticketCode}`);
 };
+
