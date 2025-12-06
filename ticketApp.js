@@ -22,6 +22,7 @@ import microsoftRoutes from './modules/microsoft-auth/microsoft.routes.js';
 import ticketRoutes from './modules/tickets/ticket.routes.js';
 import areasRoutes from './modules/areas/area.routes.js';
 import mailRoutes from './modules/mail-processor/mail.routes.js';
+import enterpriseRoutes from './modules/enterprise/enterprise.routes.js';
 
 import { processUnreadEmails } from './modules/mail-processor/mail.listener.js';
 
@@ -98,6 +99,7 @@ app.use('/api/assets', assetsRoutes);
 app.use('/api/ticket', ticketRoutes);
 app.use('/api/area', areasRoutes);
 app.use('/api/getemail', mailRoutes);
+app.use('/api/enterprise', enterpriseRoutes);
 
 // ==============================
 // 🔹 Seeds iniciales

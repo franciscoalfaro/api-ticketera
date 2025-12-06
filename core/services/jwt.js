@@ -10,7 +10,7 @@ const refresh_secret_key = process.env.REFRESH_SECRET_KEY;
 
 export const createToken = (user) => {
   const payload = {
-    id: user.id,
+    id: user._id,
     name: user.name,
     surname: user.surname,
     email: user.email,
@@ -23,7 +23,7 @@ export const createToken = (user) => {
 
 export const createRefreshToken = (user) => {
   const payload = {
-    id: user.id,
+    id: user._id,
     iat: moment().unix(),
     exp: moment().add(30, "days").unix() // Long lifespan for refresh token
   };
