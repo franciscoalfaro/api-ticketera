@@ -17,6 +17,7 @@ import {
   replaceCidImages,
   processRegularAttachments,
 } from "./mail.utils.js";
+import { generateDailyReport } from "../reports/reports.service.js";
 
 const ALLOWED_DOMAINS = ["@hotmail.cl", "@gmail.com", "@franciscoalfaro.cl"];
 
@@ -82,6 +83,8 @@ export const processIncomingMail = async (mail) => {
 
         ticket.updatedAt = new Date();
         await ticket.save();
+
+        await generateDailyReport();
 
         console.log(`✉️ Ticket ${ticketCode} actualizado`);
         ticket.isUpdate = true;
@@ -154,6 +157,8 @@ export const processIncomingMail = async (mail) => {
     });
 
     newTicket.isUpdate = false;
+
+    await generateDailyReport();
     return newTicket;
 
   } catch (error) {

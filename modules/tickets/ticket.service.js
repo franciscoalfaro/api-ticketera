@@ -2,6 +2,7 @@ import Ticket from "./ticket.model.js";
 import List from "../list/list.model.js";
 import User from "../users/user.model.js";
 import path from "path";
+import { generateDailyReport } from "../reports/reports.service.js";
 
 // Generar correlativo automático
 export const generateTicketCode = async () => {
@@ -26,6 +27,7 @@ export const createTicketService = async (data) => {
   });
 
   await ticket.save();
+  await generateDailyReport(ticket.createdAt);
   return ticket;
 };
 
@@ -194,6 +196,7 @@ export const updateTicketService = async (id, userId, data) => {
 
   ticket.updatedAt = new Date();
   await ticket.save();
+  await generateDailyReport(ticket.createdAt);
 
   return ticket;
 };

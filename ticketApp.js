@@ -23,6 +23,7 @@ import ticketRoutes from './modules/tickets/ticket.routes.js';
 import areasRoutes from './modules/areas/area.routes.js';
 import mailRoutes from './modules/mail-processor/mail.routes.js';
 import enterpriseRoutes from './modules/enterprise/enterprise.routes.js';
+import reportRoutes from "./modules/reports/reports.routes.js";
 
 import { processUnreadEmails } from './modules/mail-processor/mail.listener.js';
 
@@ -45,13 +46,15 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+
+
 // ==============================
 // 🔹 CORS CONFIG
 // ==============================
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
-  'http://localhost:5173'
+  'http://localhost:5173','https://3m2fw2jtpq1y63haymvq5d7oyqzs5wz5y21rde18pxpndncb7w-h839267052.scf.usercontent.goog',
 ];
 
 const corsOptions = {
@@ -100,6 +103,7 @@ app.use('/api/ticket', ticketRoutes);
 app.use('/api/area', areasRoutes);
 app.use('/api/getemail', mailRoutes);
 app.use('/api/enterprise', enterpriseRoutes);
+app.use("/api/reports", reportRoutes);
 
 // ==============================
 // 🔹 Seeds iniciales
@@ -125,6 +129,9 @@ cron.schedule('* * * * *', async () => {
 });
 
 console.log('⏰ Scheduler de correo activo (cada 1 minuto).');
+
+console.log(new Date().toISOString());
+console.log(new Date().toString());
 
 // ==============================
 // 🔹 Iniciar servidor
