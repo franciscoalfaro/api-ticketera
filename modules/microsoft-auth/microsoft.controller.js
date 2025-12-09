@@ -28,6 +28,7 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     // 3️⃣ Buscar el rol por defecto "agente" desde la lista de roles
     const rolesList = await List.findOne({ name: "Roles de Usuario" });
     const defaultRole = rolesList?.items.find(i => i.value === "agente");
+    console.log("🔹 Rol por defecto 'agente':", defaultRole);
 
     if (!defaultRole) {
       throw new Error("No se encontró el rol 'agente' en la lista de roles.");

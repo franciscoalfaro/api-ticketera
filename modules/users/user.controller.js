@@ -37,6 +37,7 @@ export const getUser = async (req, res) => {
 // Obtener un usuario por token
 export const getUserProfile = async (req, res) => {
   const idProfile = req.user.id
+  console.log("ID del perfil solicitado:", idProfile);
 
   try {
     const user = await getUserById(idProfile);
