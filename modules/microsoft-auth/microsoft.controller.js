@@ -68,7 +68,7 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     });
 
     // 8️⃣ Redirigir al frontend
-    res.redirect("http://localhost:5173/#/dashboard");
+    res.redirect("http://localhost:5173/dashboard");
   } catch (error) {
     console.error("❌ Error en handleMicrosoftCallback:", error);
     res.redirect("http://localhost:5173/login?error=auth_failed");
