@@ -52,9 +52,7 @@ app.use(cookieParser());
 // 🔹 CORS CONFIG
 // ==============================
 const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://localhost:5173',
+ 'https://ticketplatform.pages.dev/',
 ];
 
 const corsOptions = {
