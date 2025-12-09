@@ -61,10 +61,6 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     res.cookie('access_token', accessToken, { httpOnly: true, secure: true, sameSite: 'None' });
     res.cookie('refresh_token', refreshToken, { httpOnly: true, secure: true, sameSite: 'None' });
 
-    res.json({ status: "success", user:user, message: "Login correcto" });
-
-
-
     // 8️⃣ Redirigir al frontend
     res.redirect("https://ticketplatform.pages.dev/dashboard");
 
