@@ -51,19 +51,25 @@ app.use(cookieParser());
 // ==============================
 // 🔹 CORS CONFIG
 // ==============================
-const allowedOrigins = ['https://franalfaro.ddns.net', 'https://ticketplataform.pages.dev','http://localhost:5173'];
-
+const allowedOrigins = [
+  'https://franalfaro.ddns.net',
+  'https://ticketplatform.pages.dev',   // ✔️ corregido
+  'http://localhost:5173',
+  'http://localhost:3000'
+];
 
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.log("❌ Origen bloqueado por CORS:", origin);
       callback(new Error('Origen no permitido por CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
 app.use(cors(corsOptions));
