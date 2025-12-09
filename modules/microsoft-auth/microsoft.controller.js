@@ -69,6 +69,7 @@ export const handleMicrosoftCallback = async (req, res, next) => {
 
     // 8️⃣ Redirigir al frontend
     res.redirect("https://ticketplatform.pages.dev/dashboard");
+
   } catch (error) {
     console.error("❌ Error en handleMicrosoftCallback:", error);
     res.redirect("https://ticketplatform.pages.dev/login?error=auth_failed");
