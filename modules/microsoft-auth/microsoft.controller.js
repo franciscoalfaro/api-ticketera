@@ -61,7 +61,7 @@ export const handleMicrosoftCallback = async (req, res, next) => {
       secure: true,
       sameSite: "none",
       path: "/",
-      maxAge: 1000 * 60 * 60 * 24
+
     });
 
     res.cookie("refresh_token", refreshToken, {
@@ -69,7 +69,7 @@ export const handleMicrosoftCallback = async (req, res, next) => {
       secure: true,
       sameSite: "none",
       path: "/",
-      maxAge: 1000 * 60 * 60 * 24 * 7
+
     });
 
 
