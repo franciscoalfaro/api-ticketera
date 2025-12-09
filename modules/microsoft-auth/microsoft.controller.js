@@ -68,9 +68,9 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     });
 
     // 8️⃣ Redirigir al frontend
-    res.redirect("https://ticketplatform.pages.dev/dashboard");
+    res.redirect("http://localhost:3000/dashboard");
   } catch (error) {
     console.error("❌ Error en handleMicrosoftCallback:", error);
-    res.redirect("https://ticketplatform.pages.dev/login?error=auth_failed");
+    res.redirect("http://localhost:3000/login?error=auth_failed");
   }
 };
