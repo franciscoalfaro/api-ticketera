@@ -54,7 +54,7 @@ app.use(cookieParser());
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
-  'http://localhost:5173','https://3m2fw2jtpq1y63haymvq5d7oyqzs5wz5y21rde18pxpndncb7w-h839267052.scf.usercontent.goog',
+  'http://localhost:5173',
 ];
 
 const corsOptions = {

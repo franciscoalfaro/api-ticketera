@@ -82,3 +82,4 @@ export const generatePDFReport = async (req, res) => {
   // delega 100% la generación del PDF
   await generatePDFReportService({ from, to, res });
 };
+

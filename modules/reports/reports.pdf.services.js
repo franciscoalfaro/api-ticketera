@@ -1,174 +1,204 @@
 import PDFDocument from "pdfkit";
 import path from "path";
-import User from "../users/user.model.js";
 import { getRangeReport } from "./reports.service.js";
 
+// Paleta PowerBI PRO
+const COLORS = {
+  primary: "#1F3A65",
+  secondary: "#FFC000",
+  text: "#1A1A1A",
+  gray: "#F5F6FA",
+  tableHeader: "#1F2A40"
+};
+
+// Formato de fecha
+const fDate = (d) => new Date(d).toISOString().split("T")[0];
+
+// Redondeo seguro
+const safe = (n) =>
+  typeof n === "number" && !isNaN(n) ? n.toFixed(2) : "0";
+
 // ============================
-// Helper formateo fecha
+// Tarjetas KPI estilo PowerBI
 // ============================
-const formatDate = (d) => {
-  try {
-    if (!d) return "N/A";
-    const dt = new Date(d);
-    if (isNaN(dt)) return "N/A";
-    return dt.toISOString().split("T")[0];
-  } catch {
-    return "N/A";
-  }
+const drawKpiCard = (doc, x, y, title, value, color = COLORS.primary) => {
+  doc
+    .rect(x, y, 200, 80)
+    .fill(COLORS.gray)
+    .strokeColor(color)
+    .lineWidth(2)
+    .stroke();
+
+  doc
+    .fontSize(10)
+    .fillColor(COLORS.text)
+    .text(title, x + 15, y + 12);
+
+  doc
+    .fontSize(24)
+    .fillColor(color)
+    .text(value, x + 15, y + 35);
 };
 
 // ============================
-// Helper para tarjetas KPI
-// ============================
-const drawKpiCard = (doc, x, y, title, value) => {
-  doc.rect(x, y, 200, 80).fill("#F5F6FA").stroke();
-
-  doc.fontSize(10).fillColor("#505050").text(title, x + 15, y + 15);
-
-  doc.fontSize(20).fillColor("#1A1A1A").text(value, x + 15, y + 35);
-};
-
-// ============================
-// Helper para tablas PowerBI
+// Tabla PowerBI
 // ============================
 const drawTable = (doc, startY, title, columns, rows) => {
-  const pageWidth = doc.page.width - 80;
   const x = 40;
+  const pageWidth = doc.page.width - 80;
   let y = startY;
 
-  // Título
-  doc.fontSize(16).fillColor("#1A1A1A").text(title, x, y);
+  doc
+    .fontSize(16)
+    .fillColor(COLORS.primary)
+    .text(title, x, y);
+
   y += 25;
 
-  // Encabezado
-  doc.rect(x, y, pageWidth, 25).fill("#1F2A40");
-  doc.fontSize(12).fillColor("white");
+  // Header
+  doc
+    .rect(x, y, pageWidth, 25)
+    .fill(COLORS.tableHeader);
+
+  doc
+    .fontSize(12)
+    .fillColor("white");
 
   let colX = x + 10;
   columns.forEach(col => {
-    doc.text(col.label, colX, y + 7, { width: col.width });
+    doc.text(col.label, colX, y + 6, { width: col.width });
     colX += col.width;
   });
 
   y += 25;
 
-  // Filas
-  rows.forEach((row, idx) => {
-    const bg = idx % 2 === 0 ? "#FFFFFF" : "#FAFAFA";
+  // Rows
+  rows.forEach((row, i) => {
+    const bg = i % 2 === 0 ? "#FFFFFF" : COLORS.gray;
 
     doc.rect(x, y, pageWidth, 25).fill(bg);
-    doc.fillColor("#333");
+    doc.fillColor(COLORS.text);
 
     let colX2 = x + 10;
     columns.forEach(col => {
-      doc.text(row[col.field] ?? "—", colX2, y + 7, { width: col.width });
+      doc.text(row[col.field] ?? "", colX2, y + 6, { width: col.width });
       colX2 += col.width;
     });
 
     y += 25;
+
+    if (y > 700) {
+      doc.addPage();
+      y = 50;
+    }
   });
 
   return y + 20;
 };
 
 // ============================
-// GENERAR PDF ESTILO POWERBI
+// Gráfico de barras estilo PowerBI
+// ============================
+const drawBarChart = (doc, x, y, width, height, data, title) => {
+  // Título
+  doc
+    .fontSize(16)
+    .fillColor(COLORS.primary)
+    .text(title, x, y);
+  y += 25;
+
+  const maxVal = Math.max(...data.map(d => d.value), 1);
+  const barHeight = 22;
+  const gap = 10;
+  let posY = y;
+
+  data.forEach(d => {
+    const barWidth = (d.value / maxVal) * (width - 50);
+
+    // Label
+    doc.fontSize(12).fillColor(COLORS.text).text(d.label, x, posY);
+
+    // Bar
+    doc
+      .rect(x + 120, posY + 5, barWidth, barHeight)
+      .fill(COLORS.secondary);
+
+    // Value text
+    doc
+      .fillColor(COLORS.primary)
+      .fontSize(10)
+      .text(d.value.toString(), x + 125 + barWidth, posY + 7);
+
+    posY += barHeight + gap;
+  });
+
+  return posY;
+};
+
+// ============================
+// SERVICIO PRINCIPAL PRO
 // ============================
 export const generatePDFReportService = async ({ from, to, res }) => {
   try {
-    // Obtener reporte
     const report = await getRangeReport(from, to);
 
-    // ============================
-    // ENRIQUECER AGENTES AQUÍ
-    // ============================
-    const agentIds = new Set();
-
-    report.days.forEach(day => {
-      day.ticketsByAgent?.forEach(a => {
-        if (a.agentId) agentIds.add(a.agentId.toString());
-      });
-    });
-
-    const agentsFound = await User.find(
-      { _id: { $in: [...agentIds] } },
-      { name: 1, email: 1 }
-    ).lean();
-
-    const agentMap = {};
-    agentsFound.forEach(a => (agentMap[a._id.toString()] = a));
-
-    // Reemplazar agenteId → objeto agente real
-    report.days = report.days.map(day => ({
-      ...day,
-      ticketsByAgent: day.ticketsByAgent.map(a => ({
-        total: a.total,
-        agent: agentMap[a.agentId] || null
-      }))
-    }));
-
-    // Crear PDF
     const doc = new PDFDocument({ margin: 40 });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=reporte_${from}_${to}.pdf`
+      `attachment; filename="Reporte_${from}_${to}.pdf"`
     );
+
     doc.pipe(res);
 
-    // Logo
+    // LOGO
     try {
-      const logoPath = path.resolve("public/logo.png");
-      doc.image(logoPath, 40, 20, { width: 90 });
+      const logo = path.resolve("public/logo.png");
+      doc.image(logo, 40, 20, { width: 90 });
     } catch {}
 
-    // Título
-    doc.fontSize(26).fillColor("#1A1A1A").text("Reporte de Tickets", 140, 30);
+    // TÍTULO
+    doc
+      .fontSize(26)
+      .fillColor(COLORS.primary)
+      .text("Reporte de Tickets - PowerBI PRO", 150, 30);
 
-    doc.fontSize(12).fillColor("#505050")
-      .text(`Desde: ${formatDate(from)}`, 40, 110)
-      .text(`Hasta: ${formatDate(to)}`, 40, 130);
+    doc
+      .fontSize(12)
+      .fillColor(COLORS.text)
+      .text(`Desde: ${fDate(from)} | Hasta: ${fDate(to)}`, 40, 110);
 
-    doc.moveDown(2);
+    // ============================
+    // KPIs
+    // ============================
+    const k = report.totals;
 
-    // KPI
-    const kpi = report.totals;
-    const safe = (n) =>
-      typeof n === "number" && !isNaN(n) ? n.toFixed(2) : "N/A";
+    drawKpiCard(doc, 40, 150, "Promedio Resolución (hrs)", safe(k.avgResolutionTimeHours), COLORS.primary);
+    drawKpiCard(doc, 260, 150, "Primer Contacto (hrs)", safe(k.firstResponseTimeHours), "#0E7C86");
+    drawKpiCard(doc, 480, 150, "Tickets Cerrados", k.ticketsClosed, "#8F3A84");
 
-    drawKpiCard(doc, 40, 160, "Tiempo Promedio de Resolución (hrs)", safe(kpi.avgResolutionTimeHours));
-    drawKpiCard(doc, 260, 160, "Primer Contacto (hrs)", safe(kpi.firstResponseTimeHours));
-    drawKpiCard(doc, 480, 160, "Tickets Cerrados", kpi.ticketsClosed ?? 0);
+    let y = 260;
 
-    let y = 270;
-
-    // Tabla: Tickets por día
-    const rowsByDay = report.days.map(day => ({
-      date: formatDate(day.date),
-      created: day.totalTickets,
-      closed: day.ticketsClosed,
-      pending: day.ticketsPending
+    // ============================
+    // Gráfico barras: Tickets por día
+    // ============================
+    const chartData = report.days.map(d => ({
+      label: fDate(d.date),
+      value: d.totalTickets
     }));
 
-    y = drawTable(doc, y, "Tickets por Día", [
-      { label: "Fecha", field: "date", width: 120 },
-      { label: "Creados", field: "created", width: 100 },
-      { label: "Cerrados", field: "closed", width: 100 },
-      { label: "Pendientes", field: "pending", width: 120 }
-    ], rowsByDay);
+    y = drawBarChart(doc, 40, y, 500, 200, chartData, "Tickets creados por día");
+    y += 30;
 
-    if (y > 650) {
-      doc.addPage();
-      y = 50;
-    }
-
-    // Tabla: Tickets por agente
-    const rowsAgents = [];
+    // ============================
+    // Tabla: Tickets por Agente
+    // ============================
+    const agents = [];
 
     report.days.forEach(day => {
       day.ticketsByAgent?.forEach(a => {
         if (a.agent) {
-          rowsAgents.push({
+          agents.push({
             name: a.agent.name,
             email: a.agent.email,
             total: a.total
@@ -177,26 +207,33 @@ export const generatePDFReportService = async ({ from, to, res }) => {
       });
     });
 
-    if (rowsAgents.length > 0) {
-      y = drawTable(doc, y, "Tickets Cerrados por Agente", [
-        { label: "Agente", field: "name", width: 180 },
-        { label: "Email", field: "email", width: 220 },
+    if (agents.length > 0) {
+      y = drawTable(doc, y, "Tickets por Agente", [
+        { label: "Agente", field: "name", width: 150 },
+        { label: "Email", field: "email", width: 240 },
         { label: "Total", field: "total", width: 80 }
-      ], rowsAgents);
+      ], agents);
     }
 
-    // Pie corporativo
-    doc.fontSize(10)
-      .fillColor("#999")
-      .text("Reporte generado automáticamente por Ticketera • PowerBI Style", 40, doc.page.height - 50);
+    // FOOTER
+    doc
+      .fontSize(10)
+      .fillColor("#666")
+      .text(
+        `Reporte generado automáticamente • Ticketera PowerBI PRO • ${new Date().toLocaleString()}`,
+        40,
+        doc.page.height - 40
+      );
 
     doc.end();
 
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      status: "error",
-      message: "Error generando el PDF"
-    });
+  } catch (err) {
+    console.error(err);
+    if (!res.headersSent) {
+      res.status(500).json({
+        status: "error",
+        message: "Error generando el PDF estilo PowerBI PRO"
+      });
+    }
   }
 };
