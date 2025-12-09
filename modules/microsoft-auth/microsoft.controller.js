@@ -56,8 +56,10 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     const refreshToken = createRefreshToken(user);
 
     // 7️⃣ Guardar tokens en cookies seguras
-    res.cookie('access_token', result.accessToken, { httpOnly: true, secure: true, sameSite: 'None' });
-    res.cookie('refresh_token', result.refreshToken, { httpOnly: true, secure: true, sameSite: 'None' });
+    res.cookie('access_token', accessToken, { httpOnly: true, secure: true, sameSite: 'None' });
+    res.cookie('refresh_token', refreshToken, { httpOnly: true, secure: true, sameSite: 'None' });
+
+    
 
 
     // 8️⃣ Redirigir al frontend
