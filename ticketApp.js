@@ -52,7 +52,7 @@ app.use(cookieParser());
 // 🔹 CORS CONFIG
 // ==============================
 const allowedOrigins = [
- 'https://ticketplatform.pages.dev/',
+  'https://ticketplatform.pages.dev'
 ];
 
 const corsOptions = {
