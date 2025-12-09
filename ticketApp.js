@@ -51,11 +51,8 @@ app.use(cookieParser());
 // ==============================
 // 🔹 CORS CONFIG
 // ==============================
-const allowedOrigins = [
-  'https://ticketplatform.pages.dev','https://franalfaro.ddns.net','http://localhost:3001',
-  'http://localhost:5173',
-  'http://localhost:4173'
-];
+const allowedOrigins = ['https://franalfaro.ddns.net', 'https://ticketplataform.pages.dev','http://localhost:5173'];
+
 
 const corsOptions = {
   origin: (origin, callback) => {
