@@ -13,16 +13,16 @@ export const redirectToMicrosoftLogin = async (req, res, next) => {
   }
 };
 
-export const handleMicrosoftCallback = async (req, res, next) => {
+export const handleMicrosoftCallback = async (req, res) => {
   try {
     const { code } = req.query;
     const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
 
-    // 1️⃣ Obtener tokens e información del usuario desde Microsoft
+    // 1️⃣ Obtener tokens desde Microsoft
     const tokenResponse = await microsoftService.getTokenByAuthCode(code, redirectUri);
     const idToken = tokenResponse.idTokenClaims;
 
-    // 2️⃣ Buscar usuario existente por correo
+    // 2️⃣ Buscar usuario local
     let user = await UserService.findByEmail(idToken.preferred_username);
 
     // 3️⃣ Buscar rol por defecto
@@ -30,10 +30,10 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     const defaultRole = rolesList?.items.find(i => i.value === "agente");
 
     if (!defaultRole) {
-      throw new Error("No se encontró el rol 'agente' en la lista de roles.");
+      throw new Error("No se encontró el rol 'agente' en la lista.");
     }
 
-    // 4️⃣ Actualizar o crear usuario
+    // 4️⃣ Actualizar o crear
     if (user) {
       if (!user.microsoftId) {
         user.microsoftId = idToken.oid;
@@ -45,7 +45,7 @@ export const handleMicrosoftCallback = async (req, res, next) => {
         name: idToken.name,
         email: idToken.preferred_username,
         microsoftId: idToken.oid,
-        role: defaultRole._id,
+        role: defaultRole.value,  // 🔥 GUARDAMOS SOLO el string ("agente")
         type: "microsoft",
       });
     }
@@ -58,26 +58,32 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     res.cookie("access_token", accessToken, {
       httpOnly: true,
       secure: true,
-      sameSite: "None",
+      sameSite: "None"
     });
 
     res.cookie("refresh_token", refreshToken, {
       httpOnly: true,
       secure: true,
-      sameSite: "None",
+      sameSite: "None"
     });
 
-    // 7️⃣ Crear JSON idéntico al login manual
-    const responseData = {
-      status: "success",
-      user,
-      message: "Login Microsoft correcto"
+    // 7️⃣ Construir respuesta igual al login normal
+    const userResponse = {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role   // 🔥 IMPORTANTE: SOLO EL STRING
     };
 
-    // 8️⃣ Codificar JSON en base64 para enviarlo limpio
-    const encoded = Buffer.from(JSON.stringify(responseData)).toString("base64");
+    const responseJson = {
+      status: "success",
+      user: userResponse,
+      message: "Login correcto"
+    };
 
-    // 9️⃣ Redirigir al frontend con info
+    // 8️⃣ Codificar en Base64 para enviar vía redirect
+    const encoded = Buffer.from(JSON.stringify(responseJson)).toString("base64");
+
     return res.redirect(`https://ticketplatform.pages.dev/auth/callback?session=${encoded}`);
 
   } catch (error) {
@@ -85,3 +91,4 @@ export const handleMicrosoftCallback = async (req, res, next) => {
     return res.redirect("https://ticketplatform.pages.dev/login?error=auth_failed");
   }
 };
+

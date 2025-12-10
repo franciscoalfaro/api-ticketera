@@ -8,7 +8,6 @@ import List from "../list/list.model.js";
 export const loginService = async (email, password) => {
   try {
     const user = await User.findOne({ email }).lean();
-    console.log(user);
 
     if (!user) {
       return { status: 404, message: "Usuario no encontrado" };
@@ -84,7 +83,6 @@ export const registerService = async ({ name, email, password, role }) => {
 
 export const registerServiceLocal = async ({ name, email, password, role }) => {
   const existing = await User.findOne({ email });
-  console.log("Existing user check:", existing);
   if (existing) {
     return { status: 400, message: "Usuario ya existe" };
   }
