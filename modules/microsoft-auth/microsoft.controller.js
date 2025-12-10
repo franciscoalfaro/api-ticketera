@@ -13,27 +13,35 @@ export const redirectToMicrosoftLogin = async (req, res, next) => {
   }
 };
 
-export const handleMicrosoftCallback = async (req, res) => {
+export const handleMicrosoftCallback = async (req, res, next) => {
   try {
     const { code } = req.query;
     const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
 
-    // 1️⃣ Obtener tokens desde Microsoft
+    // 1️⃣ Obtener tokens e información del usuario desde Microsoft
     const tokenResponse = await microsoftService.getTokenByAuthCode(code, redirectUri);
     const idToken = tokenResponse.idTokenClaims;
 
-    // 2️⃣ Buscar usuario local
+    // 2️⃣ Buscar usuario existente por correo
     let user = await UserService.findByEmail(idToken.preferred_username);
 
-    // 3️⃣ Buscar rol por defecto
+    // 3️⃣ Buscar el rol por defecto "agente" desde la lista de roles
     const rolesList = await List.findOne({ name: "Roles de Usuario" });
     const defaultRole = rolesList?.items.find(i => i.value === "agente");
 
-    if (!defaultRole) {
-      throw new Error("No se encontró el rol 'agente' en la lista.");
+    let roleEnriched = null;
+
+    if (rolesList) {
+      roleEnriched = rolesList.items.find(
+        (item) => item._id.toString() === user.role?.toString()
+      );
     }
 
-    // 4️⃣ Actualizar o crear
+    if (!defaultRole) {
+      throw new Error("No se encontró el rol 'agente' en la lista de roles.");
+    }
+
+    // 4️⃣ Si el usuario existe, actualizamos microsoftId si no lo tenía
     if (user) {
       if (!user.microsoftId) {
         user.microsoftId = idToken.oid;
@@ -41,54 +49,38 @@ export const handleMicrosoftCallback = async (req, res) => {
         await user.save();
       }
     } else {
+      // 5️⃣ Crear nuevo usuario si no existía
       user = await UserService.create({
         name: idToken.name,
         email: idToken.preferred_username,
         microsoftId: idToken.oid,
-        role: defaultRole.value,  // 🔥 GUARDAMOS SOLO el string ("agente")
+        role: defaultRole._id, // 🔹 Referencia dinámica al rol "agente"
         type: "microsoft",
       });
     }
 
-    // 5️⃣ Generar tokens
+    
+
+    // 6️⃣ Generar tokens internos
     const accessToken = createToken(user);
     const refreshToken = createRefreshToken(user);
 
-    // 6️⃣ Guardar cookies
-    res.cookie("access_token", accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "None"
-    });
 
-    res.cookie("refresh_token", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "None"
-    });
+    // 7️⃣ Guardar tokens en cookies seguras
+    res.cookie('access_token', accessToken, { httpOnly: true, secure: true, sameSite: 'None' });
+    res.cookie('refresh_token', refreshToken, { httpOnly: true, secure: true, sameSite: 'None' });
+    res.json({ status: "success",user: {
+        id: user._id,
+        email: user.email,
+        name: user.name,
+        role: roleEnriched.value    // ← Aquí viene enriquecido
+      }, message: "Login correcto" });
 
-    // 7️⃣ Construir respuesta igual al login normal
-    const userResponse = {
-      id: user._id,
-      email: user.email,
-      name: user.name,
-      role: user.role   // 🔥 IMPORTANTE: SOLO EL STRING
-    };
-
-    const responseJson = {
-      status: "success",
-      user: userResponse,
-      message: "Login correcto"
-    };
-
-    // 8️⃣ Codificar en Base64 para enviar vía redirect
-    const encoded = Buffer.from(JSON.stringify(responseJson)).toString("base64");
-
-    return res.redirect(`https://ticketplatform.pages.dev/auth/callback?session=${encoded}`);
+    // 8️⃣ Redirigir al frontend
+    res.redirect("https://ticketplatform.pages.dev/dashboard");
 
   } catch (error) {
     console.error("❌ Error en handleMicrosoftCallback:", error);
-    return res.redirect("https://ticketplatform.pages.dev/login?error=auth_failed");
+    res.redirect("https://ticketplatform.pages.dev/login?error=auth_failed");
   }
 };
-
