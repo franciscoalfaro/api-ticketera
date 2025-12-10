@@ -60,17 +60,9 @@ export const handleMicrosoftCallback = async (req, res) => {
     const refreshToken = createRefreshToken(user);
 
     // Cookies
-    res.cookie("access_token", accessToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "None"
-    });
+    res.cookie("access_token", accessToken, {httpOnly: true,secure: true,sameSite: "None"});
 
-    res.cookie("refresh_token", refreshToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: "None"
-    });
+    res.cookie("refresh_token", refreshToken, {httpOnly: true, secure: true, sameSite: "None"});
 
     // Crear JSON igual que el login normal
     const responseJson = {

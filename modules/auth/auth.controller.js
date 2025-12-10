@@ -41,10 +41,12 @@ export const logout = async (req, res) => {
 
   const result = await logoutService(accessToken, refreshToken);
 
-  // 🔥 ELIMINAR COOKIES CORRECTAMENTE
-  res.clearCookie('accessToken',accessToken, { httpOnly: true, secure: true, sameSite: "None",});
+  console.log("Logout result:", result);
 
-  res.clearCookie('refreshToken',refreshToken, { httpOnly: true, secure: true, sameSite: "None", });
+  // 🔥 ELIMINAR COOKIES CORRECTAMENTE
+  res.clearCookie('accessToken',accessToken, { httpOnly: true, secure: true, sameSite: "None"});
+
+  res.clearCookie('refreshToken',refreshToken, { httpOnly: true, secure: true, sameSite: "None"});
 
   return res.status(result.status).json({
     status: result.status === 200 ? "success" : "error",
