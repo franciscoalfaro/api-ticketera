@@ -46,14 +46,12 @@ export const logout = async (req, res) => {
     httpOnly: true,
     secure: true,
     sameSite: "None",
-    path: "/",           // ¡OBLIGATORIO!
   });
 
   res.clearCookie("refresh_token", {
     httpOnly: true,
     secure: true,
     sameSite: "None",
-    path: "/",           // ¡OBLIGATORIO!
   });
 
   return res.status(result.status).json({
