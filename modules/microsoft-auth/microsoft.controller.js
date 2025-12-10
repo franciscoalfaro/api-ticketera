@@ -79,7 +79,7 @@ export const handleMicrosoftCallback = async (req, res) => {
         id: user._id,
         email: user.email,
         name: user.name,
-        role: roleEnriched.value      // 🔥 aquí va el VALUE, no el ID
+        role: roleEnriched.value    
       },
       message: "Login correcto"
     };
