@@ -42,17 +42,9 @@ export const logout = async (req, res) => {
   const result = await logoutService(accessToken, refreshToken);
 
   // 🔥 ELIMINAR COOKIES CORRECTAMENTE
-  res.clearCookie("access_token", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "None",
-  });
+  res.clearCookie(accessToken, { httpOnly: true, secure: true, sameSite: "None",});
 
-  res.clearCookie("refresh_token", {
-    httpOnly: true,
-    secure: true,
-    sameSite: "None",
-  });
+  res.clearCookie(refreshToken, { httpOnly: true, secure: true, sameSite: "None", });
 
   return res.status(result.status).json({
     status: result.status === 200 ? "success" : "error",
