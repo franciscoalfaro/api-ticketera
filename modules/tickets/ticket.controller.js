@@ -1,4 +1,5 @@
 import List from "../list/list.model.js";
+import { sendTicketResponseEmail } from "../mail-processor/mail.utils.js";
 import * as TicketService from "./ticket.service.js";
 
 // Crear ticket
@@ -64,6 +65,36 @@ export const createTicket = async (req, res) => {
       impact,
       attachments,
     });
+
+    // =====================================================
+    // 🔹 4. Enviar email de confirmación al 
+    // =====================================================
+    const fromUser = await TicketService.getUserByIdService(requester);
+    const from = fromUser?.email;
+
+    if (!from) {
+      console.warn("⚠️ El usuario no tiene email, no se envía confirmación");
+    } else {
+      const processedHtml = (description || "").replace(/\n/g, "<br/>");
+
+      await sendTicketResponseEmail({
+        to: from,
+        ticketCode: ticket.code,
+        subject: `Ticket creado: ${ticket.code}`,
+        message: `
+      Tu ticket ha sido creado correctamente.<br/><br/>
+
+      <b>Código:</b> ${ticket.code}<br/>
+      <b>Asunto:</b> ${subject}<br/><br/>
+
+      <b>Descripción:</b><br/>
+      ${processedHtml}<br/><br/>
+
+      Puedes responder este correo para continuar la conversación.
+    `,
+      });
+    }
+
 
     res.status(201).json({ status: "success", ticket });
 

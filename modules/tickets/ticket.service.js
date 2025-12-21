@@ -5,15 +5,18 @@ import path from "path";
 import { generateDailyReport } from "../reports/reports.service.js";
 
 // Generar correlativo automático
+import Counter from "../counter/counter.model.js";
+
 export const generateTicketCode = async () => {
-  const lastTicket = await Ticket.findOne().sort({ createdAt: -1 });
-  let counter = 1;
-  if (lastTicket?.code) {
-    const num = parseInt(lastTicket.code.split("-")[1]);
-    if (!isNaN(num)) counter = num + 1;
-  }
-  return `TCK-${counter.toString().padStart(4, "0")}`;
+  const counter = await Counter.findOneAndUpdate(
+    { name: "tickets" },
+    { $inc: { value: 1 } },
+    { new: true, upsert: true }
+  );
+
+  return `TCK-${String(counter.value).padStart(4, "0")}`;
 };
+
 
 // Crear ticket
 
