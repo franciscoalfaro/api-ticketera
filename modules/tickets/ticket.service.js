@@ -37,32 +37,72 @@ export const getUserById = async (id) => {
 };
 
 
-let currentBatch = {
-  min: 0,
-  max: 0,
-  current: 0
-};
 
-export const generateTicketCode = async () => {
-  // Si el batch está agotado, obtener uno nuevo
-  if (currentBatch.current >= currentBatch.max) {
-    const batchSize = 1000; // Tamaño del batch
+class TicketCodeGenerator {
+  constructor() {
+    this.batchSize = 1000;
+    this.currentBatch = {
+      min: 0,
+      max: 0,
+      current: 0
+    };
+    this.initialized = false;
+  }
+
+  async initialize() {
+    if (this.initialized) return;
+
+    const counter = await Counter.findOne({ name: "tickets" });
+    if (counter) {
+      this.currentBatch = {
+        min: counter.value - this.batchSize + 1,
+        max: counter.value,
+        current: counter.value - this.batchSize + 1
+      };
+    } else {
+      await Counter.create({ name: "tickets", value: 0 });
+    }
+
+    this.initialized = true;
+  }
+
+  async generateTicketCode() {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    // Si el batch está agotado o casi agotado (10% restante)
+    if (this.currentBatch.current >= this.currentBatch.max - (this.batchSize * 0.1)) {
+      await this.loadNewBatch();
+    }
+
+    const ticketNumber = this.currentBatch.current++;
+    return `TCK-${String(ticketNumber).padStart(4, "0")}`;
+  }
+
+  async loadNewBatch() {
     const counter = await Counter.findOneAndUpdate(
       { name: "tickets" },
-      { $inc: { value: batchSize } },
+      { $inc: { value: this.batchSize } },
       { new: true, upsert: true }
     );
 
-    currentBatch = {
-      min: counter.value - batchSize + 1,
+    this.currentBatch = {
+      min: counter.value - this.batchSize + 1,
       max: counter.value,
-      current: counter.value - batchSize + 1 // Comienza desde el primer número del batch
+      current: counter.value - this.batchSize + 1
     };
-  }
 
-  // Generar código secuencial
-  const ticketNumber = currentBatch.current++;
-  return `TCK-${String(ticketNumber).padStart(4, "0")}`;
+    console.log(`Nuevo batch de tickets cargado: ${this.currentBatch.min}-${this.currentBatch.max}`);
+  }
+}
+
+// Instancia singleton
+const generator = new TicketCodeGenerator();
+
+// Función exportada
+export const generateTicketCode = async () => {
+  return await generator.generateTicketCode();
 };
 
 

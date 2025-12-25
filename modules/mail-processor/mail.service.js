@@ -30,6 +30,7 @@ export const processIncomingMail = async (mail) => {
     const subject = mail.subject || "Sin asunto";
     const rawHtml = mail.body?.content || "";
     const attachments = mail.attachments || [];
+    const messageId = mail.internetMessageId; // Importante para tracking
 
     if (!from) return;
 
@@ -38,153 +39,204 @@ export const processIncomingMail = async (mail) => {
       return;
     }
 
-    // 1. Procesar imágenes inline (cid)
+    // 1. Procesar imágenes y adjuntos
     const cidMap = await processInlineImages(attachments);
     const processedHtml = replaceCidImages(rawHtml, cidMap);
-
-    // 2. Procesar adjuntos normales
     const regularFiles = await processRegularAttachments(attachments);
 
-    // 3. Detectar correlativo
-    const headers = mail.internetMessageHeaders || [];
-    const headerTicket = headers.find((h) => h.name === "X-Ticket-ID")?.value;
-    const matchSubject = subject.match(/TCK-\d{4}/);
+    // 2. Mejorar detección del ticket (múltiples métodos)
+    const ticketCode = await detectTicketCode(mail, subject);
 
-    const ticketCode = headerTicket || (matchSubject ? matchSubject[0] : null);
+    // 3. Buscar usuario (optimizado)
+    let requester = await findOrCreateUser(from);
 
     // =====================================================
-    // 🔹 4. SI EXISTE TICKET → ACTUALIZAR
+    // 🔹 4. PROCESAR TICKET (NUEVO O ACTUALIZACIÓN)
     // =====================================================
     if (ticketCode) {
-      const ticket = await Ticket.findOne({ code: ticketCode });
+      // Intentar actualizar ticket existente
+      const updatedTicket = await updateExistingTicket(
+        ticketCode,
+        requester._id,
+        processedHtml,
+        regularFiles,
+        messageId
+      );
 
-      if (ticket) {
-
-        // Buscar autor
-        let requester = await User.findOne({ email: from }).lean();
-
-        if (!requester) {
-          const newUser = await User.create({
-            name: from.split("@")[0],
-            email: from,
-            password: null,
-            type: "local",
-          });
-          requester = newUser.toObject();
-        }
-
-        // Registrar update
-        ticket.updates.push({
-          message: processedHtml,
-          author: requester._id,
-          attachments: regularFiles,
-          date: new Date(),
-        });
-
-        ticket.updatedAt = new Date();
-        await ticket.save();
-
-        await generateDailyReport();
-
+      if (updatedTicket) {
         console.log(`✉️ Ticket ${ticketCode} actualizado`);
-        ticket.isUpdate = true;
-        return ticket;
+        return { ...updatedTicket.toObject(), isUpdate: true };
       }
     }
 
-    // =====================================================
-    // 🔹 5. SI NO EXISTE → CREAR TICKET NUEVO
-    // =====================================================
-    const defaults = await getDefaultLists();
-    const defaultAgent = await getDefaultAgent();
-
-    let requester = await User.findOne({ email: from }).lean();
-
-    if (!requester) {
-      const rolesList = await List.findOne({ name: "Roles de Usuario" }).lean();
-      const clientRole = rolesList.items.find((i) => i.value === "cliente");
-
-      const newUser = await User.create({
-        name: from.split("@")[0],
-        email: from,
-        password: null,
-        role: clientRole._id,
-        type: "local",
-      });
-
-      requester = newUser.toObject();
-    }
-
-    const sourceList = await List.findOne({ name: "Medios de Reporte" }).lean();
-    const emailSource = sourceList.items.find((i) => i.value === "email");
-
-    const newTicket = await createTicketService({
+    // Si no se encontró ticket para actualizar, crear uno nuevo
+    return await createNewTicket(
       subject,
-      description: processedHtml,
-      requester: requester._id,
-      department: defaults.department,
-      priority: defaults.priority,
-      impact: defaults.impact,
-      type: defaults.type,
-      status: defaults.status,
-      source: emailSource._id,
-      assignedTo: defaultAgent ? defaultAgent._id : null,
-      attachments: regularFiles,
-    });
-
-    // Primer update
-    newTicket.updates.push({
-      message: processedHtml,
-      author: requester._id,
-      attachments: regularFiles,
-      date: new Date(),
-    });
-
-    await newTicket.save();
-
-    console.log(`🎫 Ticket creado: ${newTicket.code}`);
-
-    await sendTicketResponseEmail({
-      to: from,
-      ticketCode: newTicket.code,
-      subject,
-      message: `
-        Se ha creado tu ticket correctamente.<br/>
-        Puedes responder a este correo para continuar la conversación.<br/><br/>
-        <b>Resumen:</b><br/>
-        ${processedHtml}
-      `,
-    });
-
-    newTicket.isUpdate = false;
-
-    await generateDailyReport();
-    return newTicket;
+      processedHtml,
+      requester,
+      regularFiles,
+      from,
+      messageId
+    );
 
   } catch (error) {
     console.error("❌ Error procesando correo:", error);
+    throw error; // Importante para debugging
   }
 };
 
-
 // =====================================================
-// 🔹 PROCESAR TODOS LOS CORREOS
+// 🔹 FUNCIONES AUXILIARES (MEJOR ORGANIZADAS)
 // =====================================================
-export const processIncomingEmails = async () => {
-  const emails = await fetchSupportEmails();
 
-  for (const mail of emails) {
-    const ticket = await processIncomingMail(mail);
+/**
+ * Detecta el código de ticket de múltiples formas
+ */
+async function detectTicketCode(mail, subject) {
+  // 1. Buscar en headers (método más confiable)
+  const headers = mail.internetMessageHeaders || [];
+  const headerTicket = headers.find(h =>
+    h.name.toLowerCase() === "x-ticket-id" ||
+    h.name.toLowerCase() === "in-reply-to" ||
+    h.name.toLowerCase() === "references"
+  )?.value;
 
-    if (ticket && !ticket.isUpdate) {
-      await sendTicketResponseEmail({
-        to: mail.from.emailAddress.address,
-        ticketCode: ticket.code,
-        subject: "Tu ticket ha sido creado",
-        message: ticket.description,
-      });
+  if (headerTicket) {
+    // Extraer código de formato como <TCK-1234@dominio.com>
+    const match = headerTicket.match(/TCK-\d{4}/);
+    if (match) return match[0];
+  }
+
+  // 2. Buscar en subject
+  const subjectMatch = subject.match(/^(Re|Fwd|FW):\s*(TCK-\d{4})/i);
+  if (subjectMatch) return subjectMatch[2];
+
+  // 3. Buscar en el cuerpo del mensaje
+  const bodyMatch = rawHtml.match(/Ticket:\s*(TCK-\d{4})/i);
+  if (bodyMatch) return bodyMatch[1];
+
+  return null;
+}
+
+/**
+ * Busca o crea usuario (optimizado)
+ */
+async function findOrCreateUser(email) {
+  let user = await User.findOne({ email }).lean();
+
+  if (!user) {
+    const rolesList = await List.findOne({ name: "Roles de Usuario" }).lean();
+    const clientRole = rolesList?.items.find(i => i.value === "cliente");
+
+    user = await User.create({
+      name: email.split("@")[0],
+      email,
+      password: null,
+      role: clientRole?._id,
+      type: "local",
+    });
+
+    return user.toObject();
+  }
+
+  return user;
+}
+
+/**
+ * Actualiza un ticket existente
+ */
+async function updateExistingTicket(ticketCode, userId, message, attachments, messageId) {
+  // Verificar que el ticket existe y no está cerrado
+  const ticket = await Ticket.findOne({
+    code: ticketCode,
+    status: { $nin: ["closed", "resolved"] } // Evitar actualizar tickets cerrados
+  });
+
+  if (!ticket) return null;
+
+  // Evitar duplicados por el mismo messageId
+  const existingUpdate = ticket.updates.find(u =>
+    u.messageId === messageId ||
+    u.message === message // Comparación adicional por si messageId no está disponible
+  );
+
+  if (existingUpdate) {
+    console.log(`⚠️ Actualización duplicada detectada para ticket ${ticketCode}`);
+    return null;
+  }
+
+  // Agregar la actualización
+  ticket.updates.push({
+    message,
+    author: userId,
+    attachments,
+    date: new Date(),
+    messageId // Guardar para evitar duplicados
+  });
+
+  ticket.updatedAt = new Date();
+  await ticket.save();
+
+  return ticket;
+}
+
+/**
+ * Crea un nuevo ticket
+ */
+async function createNewTicket(subject, description, requester, attachments, email, messageId) {
+  const [defaults, defaultAgent, sourceList] = await Promise.all([
+    getDefaultLists(),
+    getDefaultAgent(),
+    List.findOne({ name: "Medios de Reporte" }).lean()
+  ]);
+
+  const emailSource = sourceList?.items.find(i => i.value === "email");
+
+  const newTicket = await createTicketService({
+    subject,
+    description,
+    requester: requester._id,
+    department: defaults.department,
+    priority: defaults.priority,
+    impact: defaults.impact,
+    type: defaults.type,
+    status: defaults.status,
+    source: emailSource?._id,
+    assignedTo: defaultAgent?._id,
+    attachments,
+    messageId // Guardar para tracking
+  });
+
+  // Primer update
+  newTicket.updates.push({
+    message: description,
+    author: requester._id,
+    attachments,
+    date: new Date(),
+    messageId
+  });
+
+  await newTicket.save();
+
+  // Enviar confirmación
+  await sendTicketResponseEmail({
+    to: email,
+    ticketCode: newTicket.code,
+    subject: `Tu ticket ${newTicket.code} ha sido creado`,
+    message: `
+      <p>Se ha creado tu ticket correctamente.</p>
+      <p>Código: <strong>${newTicket.code}</strong></p>
+      <p>Asunto: ${subject}</p>
+      <p>Puedes responder a este correo para continuar la conversación.</p>
+      <hr/>
+      <div>${description}</div>
+    `,
+    headers: {
+      "X-Ticket-ID": newTicket.code,
+      "In-Reply-To": `<${newTicket.code}@tu-dominio.com>`,
+      "References": `<${newTicket.code}@tu-dominio.com>`
     }
+  });
 
-    await markAsRead(mail.id);
-  }
-};
+  return newTicket;
+}
