@@ -18,6 +18,7 @@ const credential = new ClientSecretCredential(
 );
 
 const urlFront = process.env.FRONTEND_URL || "http://localhost:3012";
+const urlBack = process.env.BACK_URL || "http://localhost:3012/api-ticketera";
 
 export const getGraphClient = async () => {
   const token = await credential.getToken(
@@ -202,7 +203,7 @@ export const sendTicketResponseEmail = async ({
       <!-- HEADER -->
       <tr>
         <td style="background: #111827; padding: 25px 20px; text-align: center;">
-          <img src="${urlFront}/uploads/enterprise/${resultImage?.lastImage || 'default.png'}" alt="Logo" style="width: 120px; margin-bottom: 8px;" />
+          <img src="${urlBack}/uploads/enterprise/${resultImage?.lastImage || 'default.png'}" alt="Logo" style="width: 120px; margin-bottom: 8px;" />
           <h2 style="color: #ffffff; margin: 0; font-size: 20px;">Ticketera - Sistema de Soporte</h2>
         </td>
       </tr>
