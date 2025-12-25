@@ -146,12 +146,46 @@ export const markAsRead = async (messageId) => {
 };
 
 // =====================================================
-// 📤 4.1 se debe de buscar el logo en uploads/enterprise y asignarlo en la url <img src="https://franalfaro.ddns.net/api-ticketera/uploads/enterprise/logo.png"
-// urlFront + '/uploads/enterprise/enterprise-1765306840130.png'
+// 🔍 3B. BUSCAR Y MARCAR CORREO DEL SISTEMA COMO LEÍDO
+// =====================================================
+
+export const markSystemEmailAsRead = async (ticketCode, from) => {
+  try {
+    const client = await getGraphClient();
+    const mailbox = process.env.SUPPORT_MAILBOX;
+
+    // Buscar correos recientes del sistema que coincidan
+    const response = await client
+      .api(`/users/${mailbox}/mailFolders/Inbox/messages`)
+      .filter(`isRead eq false and subject eq '[${ticketCode}]'`)
+      .top(5)
+      .get();
+
+    const systemEmails = response.value || [];
+
+    for (const email of systemEmails) {
+      // Verificar si es un correo de confirmación del sistema
+      const headers = email.internetMessageHeaders || [];
+      const fromAddress = email.from?.emailAddress?.address;
+      
+      // Si viene del mismo mailbox de soporte o contiene texto de confirmación
+      if (fromAddress === mailbox) {
+        await client.api(`/users/${mailbox}/messages/${email.id}`).update({
+          isRead: true,
+        });
+        console.log(`✅ Correo del sistema marcado como leído: ${email.subject}`);
+      }
+    }
+  } catch (error) {
+    console.warn(`⚠️ Error buscando correos del sistema: ${error.message}`);
+  }
+};
+
+// =====================================================
+// 📤 4.1 se debe de buscar el logo en uploads/enterprise y asignarlo en la url
 // =====================================================
 
 async function getLastUploadedImage() {
-
   try {
     // Opción A: Por fecha de creación de la empresa
     const lastByCreation = await Enterprise.findOne({
@@ -181,7 +215,7 @@ async function getLastUploadedImage() {
 }
 
 // =====================================================
-// 📤 4.2 ENVIAR RESPUESTA (CON CORRELATIVO) + se debe de enviar en el header el identificador para que no se duplique tal como se hace cuando llega un correo y se procesa 
+// 📤 4.2 ENVIAR RESPUESTA (CON CORRELATIVO) - MODIFICADA
 // =====================================================
 
 export const sendTicketResponseEmail = async ({
@@ -266,17 +300,128 @@ export const sendTicketResponseEmail = async ({
         toRecipients: [{ emailAddress: { address: to } }],
         from: { emailAddress: { address: mailbox } },
         // ==========================================
-        // ✅ AGREGAR HEADER X-Ticket-ID para identificación
+        // ✅ AGREGAR HEADERS PARA IDENTIFICACIÓN
         // ==========================================
- 
+        internetMessageHeaders: [
+          { name: "X-Ticket-ID", value: ticketCode },
+          { name: "X-Ticketera-Source", value: "system" }, // 🔥 NUEVO: Identificar correos del sistema
+        ],
       },
       saveToSentItems: true,
     });
 
     console.log(`📨 Respuesta enviada a ${to} por ticket ${ticketCode} con header X-Ticket-ID`);
     
+    // 🔥 INTENTAR MARCAR EL CORREO DEL SISTEMA COMO LEÍDO INMEDIATAMENTE
+    // Esto evita que sea procesado en el siguiente ciclo
+    setTimeout(() => {
+      markSystemEmailAsRead(ticketCode, to).catch(console.warn);
+    }, 5000); // Esperar 5 segundos para que el correo llegue
+    
   } catch (error) {
     console.error(`❌ Error enviando correo para ticket ${ticketCode}:`, error);
+    throw error;
+  }
+};
+
+// =====================================================
+// 📤 4.3 FUNCIÓN PARA ENVIAR RESPUESTAS (NO CREACIÓN)
+// =====================================================
+
+export const sendTicketReplyEmail = async ({
+  to,
+  ticketCode,
+  subject,
+  message,
+  isUpdate = false
+}) => {
+  const client = await getGraphClient();
+  const mailbox = process.env.SUPPORT_MAILBOX;
+  const resultImage = await getLastUploadedImage();
+  
+  // Limpiar el asunto (remover prefijos)
+  const cleanSubject = (subject || '').replace(/^(Re:|RE:|Fwd:|FW:|R:)\s*/gi, '').trim();
+  
+  // =============================
+  //  HTML PARA RESPUESTAS
+  // =============================
+  const htmlContent = `
+  <div style="font-family: Arial, Helvetica, sans-serif; background-color: #f4f4f7; padding: 20px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 650px; margin: auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e2e2;">
+      <!-- HEADER -->
+      <tr>
+        <td style="background: #111827; padding: 25px 20px; text-align: center;">
+          <img src="${urlBack}/uploads/enterprise/${resultImage?.lastImage || 'default.png'}" alt="Logo" style="width: 120px; margin-bottom: 8px;" />
+          <h2 style="color: #ffffff; margin: 0; font-size: 20px;">Ticketera - Sistema de Soporte</h2>
+        </td>
+      </tr>
+
+      <!-- BODY -->
+      <tr>
+        <td style="padding: 30px 35px; color: #333333;">
+          <h2 style="margin-top: 0; color: #111827;">${isUpdate ? '📝 Actualización de Ticket' : '💬 Respuesta a tu Ticket'}</h2>
+
+          <p>Hola,</p>
+          <p>${isUpdate ? 'Tu ticket ha recibido una actualización:' : 'Hemos respondido a tu consulta:'}</p>
+
+          <div style="background: #f3f4f6; padding: 15px; border-left: 4px solid ${isUpdate ? '#10b981' : '#2563eb'}; margin: 25px 0; border-radius: 6px;">
+            <p style="margin: 0;"><strong>Código del Ticket:</strong> <span style="color: #2563eb; font-weight: bold;">${ticketCode}</span></p>
+            <p style="margin: 6px 0 0;"><strong>Asunto:</strong> ${cleanSubject}</p>
+          </div>
+
+          <h3 style="margin-bottom: 8px; color: #111827;">📄 ${isUpdate ? 'Actualización' : 'Respuesta'}</h3>
+          <div style="padding: 15px; background: #fafafa; border-radius: 8px; border: 1px solid #e5e7eb;">
+            ${message}
+          </div>
+
+          <p style="margin-top: 20px;">
+            Puedes responder directamente a este correo para continuar con el seguimiento del ticket.
+          </p>
+
+          <hr style="border: none; height: 1px; background: #e5e7eb; margin: 30px 0;" />
+
+          <p style="font-size: 14px; color: #555;">
+            Atentamente,<br />
+            <strong>Equipo de Soporte</strong><br />
+            Ticketera • franciscoalfaro.cl
+          </p>
+        </td>
+      </tr>
+
+      <!-- FOOTER -->
+      <tr>
+        <td style="background: #111827; padding: 15px; text-align: center;">
+          <p style="color: #ffffff; font-size: 12px; margin: 0;">
+            © ${new Date().getFullYear()} Ticketera — Todos los derechos reservados.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </div>
+  `;
+
+  try {
+    await client.api(`/users/${mailbox}/sendMail`).post({
+      message: {
+        subject: `[${ticketCode}] ${cleanSubject}`,
+        body: {
+          contentType: "HTML",
+          content: htmlContent,
+        },
+        toRecipients: [{ emailAddress: { address: to } }],
+        from: { emailAddress: { address: mailbox } },
+        internetMessageHeaders: [
+          { name: "X-Ticket-ID", value: ticketCode },
+          { name: "X-Ticketera-Type", value: isUpdate ? "update" : "reply" },
+        ],
+      },
+      saveToSentItems: true,
+    });
+
+    console.log(`📨 ${isUpdate ? 'Actualización' : 'Respuesta'} enviada para ticket ${ticketCode} a ${to}`);
+    
+  } catch (error) {
+    console.error(`❌ Error enviando ${isUpdate ? 'actualización' : 'respuesta'} para ticket ${ticketCode}:`, error);
     throw error;
   }
 };

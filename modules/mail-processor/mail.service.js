@@ -22,20 +22,111 @@ import { generateDailyReport } from "../reports/reports.service.js";
 const ALLOWED_DOMAINS = ["@hotmail.cl", "@gmail.com", "@franciscoalfaro.cl"];
 
 // =====================================================
-// 🔹 PROCESAR UN SOLO CORREO
+// 🔹 FUNCIÓN PARA DETECTAR SI ES CORREO DEL SISTEMA
+// =====================================================
+const isSystemEmail = (headers, from, subject, html) => {
+  const SUPPORT_MAILBOX = process.env.SUPPORT_MAILBOX;
+  
+  // 1. Verificar por header específico
+  const ticketeraSource = headers.find((h) => 
+    h.name === "X-Ticketera-Source" && h.value === "system"
+  );
+  
+  // 2. Verificar si viene del mismo mailbox de soporte
+  if (from === SUPPORT_MAILBOX) return true;
+  
+  // 3. Verificar contenido típico de correos del sistema
+  const systemIndicators = [
+    'Ticket creado correctamente',
+    'Se ha creado tu ticket',
+    'Tu solicitud ha sido registrada',
+    'Puedes responder directamente a este correo',
+    'Equipo de Soporte<br />Ticketera'
+  ];
+  
+  const hasSystemContent = systemIndicators.some(text => 
+    html.includes(text) || subject.includes(text)
+  );
+  
+  return ticketeraSource || hasSystemContent;
+};
+
+// =====================================================
+// 🔹 FUNCIÓN PARA LIMPIAR ASUNTO
+// =====================================================
+const cleanSubject = (subject) => {
+  if (!subject) return "Sin asunto";
+  
+  // Eliminar prefijos comunes
+  let clean = subject
+    .replace(/^(Re:|RE:|Fwd:|FW:|R:|Rsp:|Respuesta:|Respuesta al:)\s*/gi, '')
+    .trim();
+  
+  // Eliminar código de ticket del asunto si está al inicio
+  clean = clean.replace(/^\[TCK-\d{4}\]\s*/, '');
+  
+  return clean || subject;
+};
+
+// =====================================================
+// 🔹 FUNCIÓN PARA VERIFICAR UPDATE DUPLICADO
+// =====================================================
+const isDuplicateUpdate = (ticket, newMessage) => {
+  if (!ticket.updates || ticket.updates.length === 0) return false;
+  
+  const lastUpdate = ticket.updates[ticket.updates.length - 1];
+  const timeDiff = new Date() - new Date(lastUpdate.date);
+  
+  // Si el último update fue hace menos de 5 minutos
+  if (timeDiff < 300000) { // 5 minutos
+    // Extraer el primer párrafo o 100 caracteres para comparar
+    const lastMsg = lastUpdate.message.substring(0, 200);
+    const newMsg = newMessage.substring(0, 200);
+    
+    // Si son muy similares, es probablemente un duplicado
+    if (lastMsg === newMsg) {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
+// =====================================================
+// 🔹 PROCESAR UN SOLO CORREO (MODIFICADO)
 // =====================================================
 export const processIncomingMail = async (mail) => {
   try {
     const from = mail.from?.emailAddress?.address || null;
-    const subject = mail.subject || "Sin asunto";
+    const originalSubject = mail.subject || "Sin asunto";
     const rawHtml = mail.body?.content || "";
     const attachments = mail.attachments || [];
+    const headers = mail.internetMessageHeaders || [];
 
-    if (!from) return;
+    if (!from) {
+      console.log("❌ Correo sin remitente");
+      return null;
+    }
+
+    const SUPPORT_MAILBOX = process.env.SUPPORT_MAILBOX;
+    
+    // 🔥 FILTRAR CORREOS DEL SISTEMA
+    if (isSystemEmail(headers, from, originalSubject, rawHtml)) {
+      console.log(`🚫 Correo del sistema ignorado: ${cleanSubject(originalSubject).substring(0, 50)}...`);
+      
+      // Marcar como leído inmediatamente para que no sea procesado de nuevo
+      try {
+        await markAsRead(mail.id);
+      } catch (error) {
+        console.warn("⚠️ No se pudo marcar correo del sistema como leído:", error.message);
+      }
+      
+      return null;
+    }
 
     if (!ALLOWED_DOMAINS.some((d) => from.endsWith(d))) {
-      console.log(`⚠️ Correo ignorado: ${from}`);
-      return;
+      console.log(`⚠️ Correo ignorado (dominio no permitido): ${from}`);
+      return null;
     }
 
     // 1. Procesar imágenes inline (cid)
@@ -46,11 +137,11 @@ export const processIncomingMail = async (mail) => {
     const regularFiles = await processRegularAttachments(attachments);
 
     // 3. Detectar correlativo
-    const headers = mail.internetMessageHeaders || [];
     const headerTicket = headers.find((h) => h.name === "X-Ticket-ID")?.value;
-    const matchSubject = subject.match(/TCK-\d{4}/);
+    const matchSubject = originalSubject.match(/TCK-\d{4}/);
 
     const ticketCode = headerTicket || (matchSubject ? matchSubject[0] : null);
+    const cleanSubjectText = cleanSubject(originalSubject);
 
     // =====================================================
     // 🔹 4. SI EXISTE TICKET → ACTUALIZAR
@@ -59,6 +150,24 @@ export const processIncomingMail = async (mail) => {
       const ticket = await Ticket.findOne({ code: ticketCode });
 
       if (ticket) {
+        // 🔥 VERIFICAR SI ES UN UPDATE DUPLICADO
+        if (isDuplicateUpdate(ticket, processedHtml)) {
+          console.log(`⚠️ Update duplicado ignorado para ${ticketCode}`);
+          
+          // Marcar como leído de todos modos
+          try {
+            await markAsRead(mail.id);
+          } catch (error) {
+            console.warn("⚠️ No se pudo marcar correo como leído:", error.message);
+          }
+          
+          return {
+            success: false,
+            message: "Update duplicado",
+            ticketCode,
+            action: "ignored"
+          };
+        }
 
         // Buscar autor
         let requester = await User.findOne({ email: from }).lean();
@@ -79,6 +188,7 @@ export const processIncomingMail = async (mail) => {
           author: requester._id,
           attachments: regularFiles,
           date: new Date(),
+          source: "email"
         });
 
         ticket.updatedAt = new Date();
@@ -86,9 +196,19 @@ export const processIncomingMail = async (mail) => {
 
         await generateDailyReport();
 
-        console.log(`✉️ Ticket ${ticketCode} actualizado`);
-        ticket.isUpdate = true;
-        return ticket;
+        console.log(`✉️ Ticket ${ticketCode} actualizado desde email`);
+        
+        // NO ENVIAR CORREO DE RESPUESTA AQUÍ
+        // El agente responderá desde el front si es necesario
+        
+        return {
+          success: true,
+          ticket,
+          ticketCode,
+          action: "updated",
+          from,
+          message: "Ticket actualizado"
+        };
       }
     }
 
@@ -119,7 +239,7 @@ export const processIncomingMail = async (mail) => {
     const emailSource = sourceList.items.find((i) => i.value === "email");
 
     const newTicket = await createTicketService({
-      subject,
+      subject: cleanSubjectText,
       description: processedHtml,
       requester: requester._id,
       department: defaults.department,
@@ -138,53 +258,186 @@ export const processIncomingMail = async (mail) => {
       author: requester._id,
       attachments: regularFiles,
       date: new Date(),
+      source: "email"
     });
 
     await newTicket.save();
 
-    console.log(`🎫 Ticket creado: ${newTicket.code}`);
+    console.log(`🎫 Ticket creado desde email: ${newTicket.code}`);
 
-    await sendTicketResponseEmail({
-      to: from,
-      ticketCode: newTicket.code,
-      subject,
-      message: `
-        Se ha creado tu ticket correctamente.<br/>
-        Puedes responder a este correo para continuar la conversación.<br/><br/>
-        <b>Resumen:</b><br/>
-        ${processedHtml}
-      `,
-    });
-
-    newTicket.isUpdate = false;
+    // 🔥 ENVIAR CORREO DE CONFIRMACIÓN CON DELAY
+    // Esto evita que el correo de confirmación sea procesado inmediatamente
+    setTimeout(async () => {
+      try {
+        await sendTicketResponseEmail({
+          to: from,
+          ticketCode: newTicket.code,
+          subject: cleanSubjectText,
+          message: `
+            Se ha creado tu ticket correctamente.<br/>
+            Puedes responder a este correo para continuar la conversación.<br/><br/>
+            <b>Resumen:</b><br/>
+            ${processedHtml}
+          `,
+        });
+        console.log(`✅ Correo de confirmación enviado para ${newTicket.code}`);
+      } catch (error) {
+        console.error(`❌ Error enviando correo de confirmación para ${newTicket.code}:`, error);
+      }
+    }, 15000); // 15 segundos de delay
 
     await generateDailyReport();
-    return newTicket;
+    
+    return {
+      success: true,
+      ticket: newTicket,
+      ticketCode: newTicket.code,
+      action: "created",
+      from,
+      message: "Ticket creado"
+    };
 
   } catch (error) {
     console.error("❌ Error procesando correo:", error);
+    return {
+      success: false,
+      error: error.message
+    };
   }
 };
 
-
 // =====================================================
-// 🔹 PROCESAR TODOS LOS CORREOS
+// 🔹 PROCESAR TODOS LOS CORREOS (MODIFICADO)
 // =====================================================
 export const processIncomingEmails = async () => {
-  const emails = await fetchSupportEmails();
+  try {
+    const emails = await fetchSupportEmails();
+    console.log(`📨 Encontrados ${emails.length} correos nuevos`);
 
-  for (const mail of emails) {
-    const ticket = await processIncomingMail(mail);
+    const results = [];
+    let createdCount = 0;
+    let updatedCount = 0;
+    let ignoredCount = 0;
 
-    if (ticket && !ticket.isUpdate) {
+    for (const mail of emails) {
+      console.log(`📧 Procesando: ${mail.subject?.substring(0, 50)}...`);
+      
+      const result = await processIncomingMail(mail);
+      
+      if (result) {
+        results.push(result);
+        
+        if (result.action === "created") {
+          createdCount++;
+        } else if (result.action === "updated") {
+          updatedCount++;
+        } else if (result.action === "ignored") {
+          ignoredCount++;
+        }
+      }
+      
+      // Solo marcar como leído si no es un correo del sistema
+      // (los correos del sistema ya se marcan como leídos en processIncomingMail)
+      if (result && result.action !== "ignored") {
+        try {
+          await markAsRead(mail.id);
+        } catch (error) {
+          console.warn(`⚠️ No se pudo marcar correo como leído:`, error.message);
+        }
+      }
+      
+      // Pequeña pausa entre correos para no sobrecargar
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    console.log(`📊 Resultados: ${createdCount} creados, ${updatedCount} actualizados, ${ignoredCount} ignorados`);
+    
+    return {
+      success: true,
+      stats: {
+        total: emails.length,
+        created: createdCount,
+        updated: updatedCount,
+        ignored: ignoredCount
+      },
+      results
+    };
+    
+  } catch (error) {
+    console.error("❌ Error procesando correos:", error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+// =====================================================
+// 🔹 FUNCIÓN PARA ENVIAR RESPUESTA DESDE FRONTEND
+// =====================================================
+export const sendTicketReplyFromFrontend = async ({
+  ticketId,
+  message,
+  authorId,
+  attachments = [],
+  sendEmail = true
+}) => {
+  try {
+    const ticket = await Ticket.findById(ticketId)
+      .populate('requester', 'email name')
+      .populate('assignedTo', 'email name');
+
+    if (!ticket) {
+      throw new Error('Ticket no encontrado');
+    }
+
+    const author = await User.findById(authorId);
+    if (!author) {
+      throw new Error('Autor no encontrado');
+    }
+
+    // 1. Agregar la actualización a la bitácora
+    const updateData = {
+      message,
+      author: authorId,
+      attachments,
+      date: new Date(),
+      source: 'web',
+      type: 'agent_reply'
+    };
+
+    ticket.updates.push(updateData);
+    ticket.updatedAt = new Date();
+    
+    // Si el ticket no tenía asignado, asignar al autor
+    if (!ticket.assignedTo && authorId) {
+      ticket.assignedTo = authorId;
+    }
+    
+    await ticket.save();
+
+    // 2. Enviar correo al usuario si está configurado
+    if (sendEmail && ticket.requester?.email) {
       await sendTicketResponseEmail({
-        to: mail.from.emailAddress.address,
+        to: ticket.requester.email,
         ticketCode: ticket.code,
-        subject: "Tu ticket ha sido creado",
-        message: ticket.description,
+        subject: ticket.subject,
+        message: message,
       });
     }
 
-    await markAsRead(mail.id);
+    // 3. Registrar en el reporte diario
+    await generateDailyReport();
+
+    return {
+      success: true,
+      ticket: ticket,
+      update: updateData,
+      message: 'Actualización agregada y correo enviado'
+    };
+    
+  } catch (error) {
+    console.error('❌ Error en sendTicketReplyFromFrontend:', error);
+    throw error;
   }
 };
