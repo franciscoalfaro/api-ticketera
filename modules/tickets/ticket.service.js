@@ -38,19 +38,37 @@ export const getUserById = async (id) => {
 
 
 export const generateTicketCode = async () => {
-  const counter = await Counter.findOneAndUpdate(
-    { name: "tickets" },
-    { $inc: { value: 1 } },
-    { new: true, upsert: true }
-  );
+  let ticketCode;
+  let attempts = 0;
+  const maxAttempts = 10; // Límite de intentos para evitar bucles infinitos
 
-  return `TCK-${String(counter.value).padStart(4, "0")}`;
+  do {
+    // Incrementar el contador
+    const counter = await Counter.findOneAndUpdate(
+      { name: "tickets" },
+      { $inc: { value: 1 } },
+      { new: true, upsert: true }
+    );
+
+    // Generar el código de ticket
+    ticketCode = `TCK-${String(counter.value).padStart(4, "0")}`;
+
+    // Verificar si el ticket ya existe en la base de datos
+    const existingTicket = await Ticket.findOne({ code: ticketCode });
+
+    if (!existingTicket) {
+      return ticketCode; // Retornar si no existe
+    }
+
+    attempts++;
+  } while (attempts < maxAttempts);
+
+  // Si llegamos aquí, significa que todos los intentos fallaron
+  throw new Error(`No se pudo generar un código de ticket único después de ${maxAttempts} intentos`);
 };
 
 
 // Crear ticket
-
-
 export const createTicketService = async (data) => {
   // Generar código automático
   const code = await generateTicketCode();
