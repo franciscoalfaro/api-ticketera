@@ -2,6 +2,7 @@
 
 import { Client } from "@microsoft/microsoft-graph-client";
 import { ClientSecretCredential } from "@azure/identity";
+import Enterprise from "../enterprise/enterprise.model.js";
 import fs from "fs";
 import path from "path";
 import "isomorphic-fetch";
@@ -144,7 +145,42 @@ export const markAsRead = async (messageId) => {
 };
 
 // =====================================================
-// 📤 4. ENVIAR RESPUESTA (CON CORRELATIVO)
+// 📤 4.1 se debe de buscar el logo en uploads/enterprise y asignarlo en la url <img src="https://franalfaro.ddns.net/api-ticketera/uploads/enterprise/logo.png"
+// urlFront + '/uploads/enterprise/enterprise-1765306840130.png'
+// =====================================================
+
+async function getLastUploadedImage() {
+
+  try {
+    // Opción A: Por fecha de creación de la empresa
+    const lastByCreation = await Enterprise.findOne({
+      image: { $ne: 'default.png' } // excluir imagen por defecto
+    })
+      .sort({ createdAt: -1 })
+      .select('image name createdAt');
+
+    // Opción B: Por fecha de actualización
+    const lastByUpdate = await Enterprise.findOne({
+      image: { $ne: 'default.png' }
+    })
+      .sort({ updatedAt: -1 })
+      .select('image name updatedAt');
+
+    return {
+      byCreation: lastByCreation,
+      byUpdate: lastByUpdate,
+      // O decide cuál usar:
+      lastImage: lastByUpdate?.image || lastByCreation?.image
+    };
+
+  } catch (error) {
+    console.error('Error buscando la última imagen:', error);
+    return null;
+  }
+}
+
+// =====================================================
+// 📤 4.2 ENVIAR RESPUESTA (CON CORRELATIVO) + se debe de enviar en el header el identificador para que no se duplique tal como se hace cuando llega un correo y se procesa 
 // =====================================================
 
 export const sendTicketResponseEmail = async ({
@@ -155,7 +191,8 @@ export const sendTicketResponseEmail = async ({
 }) => {
   const client = await getGraphClient();
   const mailbox = process.env.SUPPORT_MAILBOX;
-
+  const resultImage = await getLastUploadedImage();
+  
   // =============================
   //  HTML FINAL DEL CORREO
   // =============================
@@ -165,7 +202,7 @@ export const sendTicketResponseEmail = async ({
       <!-- HEADER -->
       <tr>
         <td style="background: #111827; padding: 25px 20px; text-align: center;">
-          <img src="https://franciscoalfaro.cl/logo.png" alt="Logo" style="width: 120px; margin-bottom: 8px;" />
+          <img src="${urlFront}/uploads/enterprise/${resultImage?.lastImage || 'default.png'}" alt="Logo" style="width: 120px; margin-bottom: 8px;" />
           <h2 style="color: #ffffff; margin: 0; font-size: 20px;">Ticketera - Sistema de Soporte</h2>
         </td>
       </tr>
@@ -215,24 +252,30 @@ export const sendTicketResponseEmail = async ({
   `;
 
   // =============================
-  // 🔥 ENVÍO REAL DEL CORREO
+  // 🔥 ENVÍO REAL DEL CORREO CON HEADER X-Ticket-ID
   // =============================
-  await client.api(`/users/${mailbox}/sendMail`).post({
-    message: {
-      subject: `[${ticketCode}] ${subject || "Ticket creado"}`,
-      body: {
-        contentType: "HTML",
-        content: htmlContent, // 👈 ESTE ES EL CORRECTO
+  try {
+    await client.api(`/users/${mailbox}/sendMail`).post({
+      message: {
+        subject: `[${ticketCode}] ${subject || "Ticket creado"}`,
+        body: {
+          contentType: "HTML",
+          content: htmlContent,
+        },
+        toRecipients: [{ emailAddress: { address: to } }],
+        from: { emailAddress: { address: mailbox } },
+        // ==========================================
+        // ✅ AGREGAR HEADER X-Ticket-ID para identificación
+        // ==========================================
+ 
       },
-      toRecipients: [{ emailAddress: { address: to } }],
-      from: { emailAddress: { address: mailbox } },
-      internetMessageHeaders: [
-        { name: "X-Ticket-ID", value: ticketCode },
-      ],
-    },
-    saveToSentItems: true,
-  });
+      saveToSentItems: true,
+    });
 
-  console.log(`📨 Respuesta enviada a ${to} por ticket ${ticketCode}`);
+    console.log(`📨 Respuesta enviada a ${to} por ticket ${ticketCode} con header X-Ticket-ID`);
+    
+  } catch (error) {
+    console.error(`❌ Error enviando correo para ticket ${ticketCode}:`, error);
+    throw error;
+  }
 };
-

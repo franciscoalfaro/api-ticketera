@@ -1,6 +1,7 @@
 import List from "../list/list.model.js";
 import { sendTicketResponseEmail } from "../mail-processor/mail.utils.js";
 import * as TicketService from "./ticket.service.js";
+import User from "../users/user.model.js"; // Asegúrate de importar el modelo User
 
 // Crear ticket
 export const createTicket = async (req, res) => {
@@ -67,43 +68,41 @@ export const createTicket = async (req, res) => {
     });
 
     // =====================================================
-    // 🔹 4. Enviar email de confirmación al 
+    // 🔹 4. Enviar email de confirmación con header X-Ticket-ID
     // =====================================================
-    const fromUser = await TicketService.getUserByIdService(requester);
-    const from = fromUser?.email;
+    // Obtener el email del usuario que crea el ticket
+    const fromUser = await User.findById(requester).select('email name');
+    const fromEmail = fromUser?.email;
 
-    if (!from) {
+    if (!fromEmail) {
       console.warn("⚠️ El usuario no tiene email, no se envía confirmación");
     } else {
+      // Procesar HTML para mostrar saltos de línea
       const processedHtml = (description || "").replace(/\n/g, "<br/>");
 
+      // Enviar correo con el header X-Ticket-ID incluido
       await sendTicketResponseEmail({
-        to: from,
-        ticketCode: ticket.code,
-        subject: `Ticket creado: ${ticket.code}`,
-        message: `
-      Tu ticket ha sido creado correctamente.<br/><br/>
-
-      <b>Código:</b> ${ticket.code}<br/>
-      <b>Asunto:</b> ${subject}<br/><br/>
-
-      <b>Descripción:</b><br/>
-      ${processedHtml}<br/><br/>
-
-      Puedes responder este correo para continuar la conversación.
-    `,
+        to: fromEmail,
+        ticketCode: ticket.code, // Este será usado en el header X-Ticket-ID
+        subject: subject || "Ticket creado",
+        message: processedHtml,
       });
     }
 
-
-    res.status(201).json({ status: "success", ticket });
+    res.status(201).json({ 
+      status: "success", 
+      ticket,
+      message: `Ticket ${ticket.code} creado exitosamente` 
+    });
 
   } catch (error) {
-    console.error(error);
-    res.status(400).json({ status: "error", message: error.message });
+    console.error("❌ Error creando ticket:", error);
+    res.status(400).json({ 
+      status: "error", 
+      message: error.message 
+    });
   }
 };
-
 
 
 export const getTicketById = async (req, res) => {

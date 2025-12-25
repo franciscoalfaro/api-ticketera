@@ -7,6 +7,36 @@ import { generateDailyReport } from "../reports/reports.service.js";
 // Generar correlativo automático
 import Counter from "../counter/counter.model.js";
 
+
+// Obtener usuario por ID
+export const getUserById = async (id) => {
+  // Buscar el usuario con su área
+  const user = await User.findById(id)
+    .populate("area", "name color")
+    .select("-password");
+
+  if (!user) {
+    throw new Error("Usuario no encontrado");
+  }
+
+  // Buscar la lista de roles
+  const rolesList = await List.findOne({ name: "Roles de Usuario", isDeleted: false });
+
+  // Buscar el rol correspondiente dentro de la lista
+  const role = rolesList?.items?.id(user.role);
+
+  // Enriquecer la respuesta
+  const enrichedUser = {
+    ...user.toObject(),
+    role: role
+      ? { label: role.label, value: role.value, color: role.color }
+      : null,
+  };
+
+  return enrichedUser;
+};
+
+
 export const generateTicketCode = async () => {
   const counter = await Counter.findOneAndUpdate(
     { name: "tickets" },
