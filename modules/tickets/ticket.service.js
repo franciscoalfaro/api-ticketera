@@ -37,30 +37,32 @@ export const getUserById = async (id) => {
 };
 
 
+let currentBatch = {
+  min: 0,
+  max: 0,
+  current: 0
+};
+
 export const generateTicketCode = async () => {
-  // 1. Obtener un batch de números (ej: 100 números a la vez)
-  const batchSize = 100;
-  const counter = await Counter.findOneAndUpdate(
-    { name: "tickets" },
-    { $inc: { value: batchSize } },
-    { new: true, upsert: true }
-  );
+  // Si el batch está agotado, obtener uno nuevo
+  if (currentBatch.current >= currentBatch.max) {
+    const batchSize = 1000; // Tamaño del batch
+    const counter = await Counter.findOneAndUpdate(
+      { name: "tickets" },
+      { $inc: { value: batchSize } },
+      { new: true, upsert: true }
+    );
 
-  // 2. Generar un número único dentro del batch (sin consultar la BD)
-  const nextValue = counter.value - batchSize + 1; // Primer número del batch
-  const ticketNumber = nextValue + Math.floor(Math.random() * batchSize); // Número aleatorio en el rango
-
-  // 3. Formatear el código
-  const ticketCode = `TCK-${String(ticketNumber).padStart(4, "0")}`;
-
-  // 4. Verificar si ya existe (opcional, pero recomendado)
-  const existingTicket = await Ticket.findOne({ code: ticketCode });
-  if (existingTicket) {
-    // Si hay colisión (poco probable), generar otro número en el batch
-    return generateTicketCode(); // Reintentar (con límite de intentos)
+    currentBatch = {
+      min: counter.value - batchSize + 1,
+      max: counter.value,
+      current: counter.value - batchSize + 1 // Comienza desde el primer número del batch
+    };
   }
 
-  return ticketCode;
+  // Generar código secuencial
+  const ticketNumber = currentBatch.current++;
+  return `TCK-${String(ticketNumber).padStart(4, "0")}`;
 };
 
 
