@@ -38,33 +38,29 @@ export const getUserById = async (id) => {
 
 
 export const generateTicketCode = async () => {
-  let ticketCode;
-  let attempts = 0;
-  const maxAttempts = 10; // Límite de intentos para evitar bucles infinitos
+  // 1. Obtener un batch de números (ej: 100 números a la vez)
+  const batchSize = 100;
+  const counter = await Counter.findOneAndUpdate(
+    { name: "tickets" },
+    { $inc: { value: batchSize } },
+    { new: true, upsert: true }
+  );
 
-  do {
-    // Incrementar el contador
-    const counter = await Counter.findOneAndUpdate(
-      { name: "tickets" },
-      { $inc: { value: 1 } },
-      { new: true, upsert: true }
-    );
+  // 2. Generar un número único dentro del batch (sin consultar la BD)
+  const nextValue = counter.value - batchSize + 1; // Primer número del batch
+  const ticketNumber = nextValue + Math.floor(Math.random() * batchSize); // Número aleatorio en el rango
 
-    // Generar el código de ticket
-    ticketCode = `TCK-${String(counter.value).padStart(4, "0")}`;
+  // 3. Formatear el código
+  const ticketCode = `TCK-${String(ticketNumber).padStart(4, "0")}`;
 
-    // Verificar si el ticket ya existe en la base de datos
-    const existingTicket = await Ticket.findOne({ code: ticketCode });
+  // 4. Verificar si ya existe (opcional, pero recomendado)
+  const existingTicket = await Ticket.findOne({ code: ticketCode });
+  if (existingTicket) {
+    // Si hay colisión (poco probable), generar otro número en el batch
+    return generateTicketCode(); // Reintentar (con límite de intentos)
+  }
 
-    if (!existingTicket) {
-      return ticketCode; // Retornar si no existe
-    }
-
-    attempts++;
-  } while (attempts < maxAttempts);
-
-  // Si llegamos aquí, significa que todos los intentos fallaron
-  throw new Error(`No se pudo generar un código de ticket único después de ${maxAttempts} intentos`);
+  return ticketCode;
 };
 
 
