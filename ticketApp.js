@@ -24,6 +24,7 @@ import areasRoutes from './modules/areas/area.routes.js';
 import mailRoutes from './modules/mail-processor/mail.routes.js';
 import enterpriseRoutes from './modules/enterprise/enterprise.routes.js';
 import reportRoutes from "./modules/reports/reports.routes.js";
+import uploadRoutes from './modules/uploads/uploads.routes.js';
 
 import { processUnreadEmails } from './modules/mail-processor/mail.listener.js';
 
@@ -92,7 +93,12 @@ app.use((req, res, next) => {
 // ==============================
 // 🔹 STATIC FILES
 // ==============================
-app.use('/uploads', express.static(path.join('uploads')));
+
+// 1. carpeta pública (logos)
+app.use('/uploads/enterprise', express.static(path.join('uploads/enterprise')));
+
+// 1. carpeta uploads (privada, protegida por auth middleware)
+app.use('/uploads', uploadRoutes);
 
 // ==============================
 // 🔹 Rutas
