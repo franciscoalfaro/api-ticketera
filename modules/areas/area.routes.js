@@ -7,12 +7,12 @@ import {
   deleteArea,
 } from "./area.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
-import { logAction } from "../../core/middlewares/logMiddleware.js";
+// import { logAction } from "../../core/middlewares/logMiddleware.js";
 
 const router = Router();
 
 router.use(auth);
-router.use(logAction("areas"));
+// router.use(logAction("areas"));
 
 // Crear área
 router.post("/create", createArea);

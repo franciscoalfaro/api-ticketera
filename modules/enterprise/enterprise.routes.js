@@ -2,14 +2,14 @@ import express from "express";
 import { createEnterprise, deleteEnterprise, getEnterprise, getPublicEnterprise, updateEnterprise, uploadEnterpriseLogo } from "./enterprise.controller.js";
 import { createUploadMiddleware } from "../../core/middlewares/uploads.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
-import { logAction } from "../../core/middlewares/logMiddleware.js";
+// import { logAction } from "../../core/middlewares/logMiddleware.js";
 
 const router = express.Router();
 
 // Ruta pública: obtener nombre y logo
 router.get("/public", getPublicEnterprise);
 router.use(auth);
-router.use(logAction("enterprise"));
+// router.use(logAction("enterprise"));
 
 const uploadNameEnteprise= createUploadMiddleware({ folder: "enterprise", prefix: "enterprise-", allowedTypes: /jpeg|jpg|png|gif/,
 });

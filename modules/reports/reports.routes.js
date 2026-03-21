@@ -1,9 +1,9 @@
 import express from "express";
 import {  generateReportToday, getReport, getReportBetweenDates, getLast7Days, generatePDFReport } from "./reports.controller.js";
-import { logAction } from "../../core/middlewares/logMiddleware.js";
+// import { logAction } from "../../core/middlewares/logMiddleware.js";
 
 const router = express.Router();
-router.use(logAction("report"));
+// router.use(logAction("report"));
 
 // Generar reporte manual del día de los ticket creados hoy
 router.get("/generate/today", generateReportToday);

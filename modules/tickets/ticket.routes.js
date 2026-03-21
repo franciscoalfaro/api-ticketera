@@ -11,12 +11,12 @@ import {
   getUpdateById
 } from "./ticket.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
-import { logAction } from "../../core/middlewares/logMiddleware.js";
+// import { logAction } from "../../core/middlewares/logMiddleware.js";
 import { createUploadMiddleware } from "../../core/middlewares/uploads.js";
 
 const router = Router();
 router.use(auth);
-router.use(logAction("ticket"));
+// router.use(logAction("ticket"));
 
 const uploadTickets = createUploadMiddleware({ folder: "tickets", prefix: "ticket-", allowedTypes: /jpeg|jpg|png|gif|pdf|docx|xlsx/,
 });

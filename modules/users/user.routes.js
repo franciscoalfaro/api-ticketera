@@ -1,10 +1,10 @@
 import express from "express";
 import {activateUser, createUser, deleteUser, getAssignableUsers, getUser, getUserProfile, getUsers, updateUser } from "./user.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
-import { logAction } from "../../core/middlewares/logMiddleware.js";
+// import { logAction } from "../../core/middlewares/logMiddleware.js";
 
 const router = express.Router();
-router.use(logAction("users"));
+// router.use(logAction("users"));
 // Todas las rutas protegidas con auth middleware
 router.use(auth);
 
