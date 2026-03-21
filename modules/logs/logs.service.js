@@ -1,4 +1,4 @@
-import Log from "../../models/log.js";
+import Log from "./logs.model.js";
 
 export const createLog = async ({ user, action, module, description, method, status, ip }) => {
   try {

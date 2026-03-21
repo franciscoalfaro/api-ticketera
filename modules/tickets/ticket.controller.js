@@ -2,6 +2,7 @@ import List from "../list/list.model.js";
 import { sendTicketResponseEmail } from "../mail-processor/mail.utils.js";
 import * as TicketService from "./ticket.service.js";
 import User from "../users/user.model.js"; // Asegúrate de importar el modelo User
+import { createLog } from "../logs/logs.service.js";
 
 // Crear ticket
 export const createTicket = async (req, res) => {
@@ -95,8 +96,27 @@ export const createTicket = async (req, res) => {
       message: `Ticket ${ticket.code} creado exitosamente` 
     });
 
+    await createLog({
+      user: req.user?.id || requester,
+      action: "CREAR_TICKET",
+      module: "tickets",
+      description: `Ticket creado: ${ticket.code}`,
+      status: "success",
+      method: "POST",
+      ip: req.clientIp,
+    });
+
   } catch (error) {
     console.error("❌ Error creando ticket:", error);
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_CREAR_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "POST",
+      ip: req.clientIp,
+    });
     res.status(400).json({ 
       status: "error", 
       message: error.message 
@@ -110,13 +130,42 @@ export const getTicketById = async (req, res) => {
     const id = req.params.id;
     const ticket = await TicketService.getTicketByIdService(id);
 
-    if (!ticket)
+    if (!ticket) {
+      await createLog({
+        user: req.user?.id,
+        action: "ERROR_OBTENER_TICKET",
+        module: "tickets",
+        description: `Ticket no encontrado ${id}`,
+        status: "error",
+        method: "GET",
+        ip: req.clientIp,
+      });
       return res.status(404).json({ status: "error", message: "Ticket no encontrado" });
+    }
+
+    await createLog({
+      user: req.user?.id,
+      action: "OBTENER_TICKET",
+      module: "tickets",
+      description: `Consulta ticket ${id}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
 
     res.json({ status: "success", ticket });
 
   } catch (error) {
     console.error(error);
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_OBTENER_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.status(500).json({ status: "error", message: error.message });
   }
 };
@@ -126,8 +175,26 @@ export const getTickets = async (req, res) => {
   try {
     const page = parseInt(req.params.page) || 1;
     const data = await TicketService.getTicketsService(page);
+    await createLog({
+      user: req.user?.id,
+      action: "LISTAR_TICKETS",
+      module: "tickets",
+      description: `Listado de tickets página ${page}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.json({ status: "success", ...data });
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_LISTAR_TICKETS",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.status(500).json({ status: "error", message: error.message });
   }
 };
@@ -137,8 +204,26 @@ export const getMyTickets = async (req, res) => {
   try {
     const page = parseInt(req.params.page) || 1;
     const data = await TicketService.getMyTicketsService(req.user.id, page);
+    await createLog({
+      user: req.user?.id,
+      action: "LISTAR_MIS_TICKETS",
+      module: "tickets",
+      description: `Listado de tickets del usuario página ${page}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.json({ status: "success", ...data });
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_LISTAR_MIS_TICKETS",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.status(500).json({ status: "error", message: error.message });
   }
 };
@@ -151,9 +236,28 @@ export const updateTicket = async (req, res) => {
 
     const updated = await TicketService.updateTicketService(id, userId, req.body);
 
+    await createLog({
+      user: userId,
+      action: "ACTUALIZAR_TICKET",
+      module: "tickets",
+      description: `Ticket actualizado ${id}`,
+      status: "success",
+      method: "PUT",
+      ip: req.clientIp,
+    });
+
     res.json({ status: "success", ticket: updated });
   } catch (error) {
     console.error(error);
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_ACTUALIZAR_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "PUT",
+      ip: req.clientIp,
+    });
     res.status(400).json({ status: "error", message: error.message });
   }
 };
@@ -171,8 +275,26 @@ export const addTicketUpdate = async (req, res) => {
     })) || [];
 
     const updatedTicket = await TicketService.addUpdateToTicket(idTicket, { message, attachments, userId });
+    await createLog({
+      user: userId,
+      action: "AGREGAR_ACTUALIZACION_TICKET",
+      module: "tickets",
+      description: `Actualización agregada al ticket ${idTicket}`,
+      status: "success",
+      method: "POST",
+      ip: req.clientIp,
+    });
     res.json({ status: "success", ticket: updatedTicket });
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_AGREGAR_ACTUALIZACION_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "POST",
+      ip: req.clientIp,
+    });
     res.status(400).json({ status: "error", message: error.message });
   }
 };
@@ -181,8 +303,26 @@ export const addTicketUpdate = async (req, res) => {
 export const deleteTicket = async (req, res) => {
   try {
     const result = await TicketService.deleteTicketService(req.body.id);
+    await createLog({
+      user: req.user?.id,
+      action: "ELIMINAR_TICKET",
+      module: "tickets",
+      description: `Ticket eliminado ${req.body.id}`,
+      status: "success",
+      method: "DELETE",
+      ip: req.clientIp,
+    });
     res.json(result);
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_ELIMINAR_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "DELETE",
+      ip: req.clientIp,
+    });
     res.status(500).json({ status: "error", message: error.message });
   }
 };
@@ -193,13 +333,41 @@ export const getUpdatesSummary = async (req, res) => {
     const result = await TicketService.getUpdatesSummaryService(req.params.id);
 
     if (!result) {
+      await createLog({
+        user: req.user?.id,
+        action: "ERROR_RESUMEN_ACTUALIZACIONES_TICKET",
+        module: "tickets",
+        description: `Ticket no encontrado ${req.params.id}`,
+        status: "error",
+        method: "GET",
+        ip: req.clientIp,
+      });
       return res.status(404).json({ status: "error", message: "Ticket no encontrado" });
     }
+
+    await createLog({
+      user: req.user?.id,
+      action: "RESUMEN_ACTUALIZACIONES_TICKET",
+      module: "tickets",
+      description: `Resumen de actualizaciones para ticket ${req.params.id}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
 
     return res.json({ status: "success", updates: result });
 
   } catch (error) {
     console.error(error);
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_RESUMEN_ACTUALIZACIONES_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     return res.status(500).json({ status: "error", message: error.message });
   }
 };
@@ -210,13 +378,41 @@ export const getUpdateById = async (req, res) => {
     const update = await TicketService.getUpdateByIdService(req.params.updateId);
 
     if (!update) {
+      await createLog({
+        user: req.user?.id,
+        action: "ERROR_OBTENER_ACTUALIZACION_TICKET",
+        module: "tickets",
+        description: `Actualización no encontrada ${req.params.updateId}`,
+        status: "error",
+        method: "GET",
+        ip: req.clientIp,
+      });
       return res.status(404).json({ status: "error", message: "Actualización no encontrada" });
     }
+
+    await createLog({
+      user: req.user?.id,
+      action: "OBTENER_ACTUALIZACION_TICKET",
+      module: "tickets",
+      description: `Consulta actualización ${req.params.updateId}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
 
     return res.json({ status: "success", update });
 
   } catch (error) {
     console.error(error);
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_OBTENER_ACTUALIZACION_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     return res.status(500).json({ status: "error", message: error.message });
   }
 };

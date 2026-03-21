@@ -2,13 +2,32 @@ import * as microsoftService from "./microsoft.service.js";
 import * as UserService from "../users/user.service.js";
 import List from "../list/list.model.js";
 import { createToken, createRefreshToken } from "../../core/services/jwt.js";
+import { createLog } from "../logs/logs.service.js";
 
 export const redirectToMicrosoftLogin = async (req, res, next) => {
   try {
     const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
     const authUrl = await microsoftService.getAuthUrl(redirectUri);
+    await createLog({
+      user: req.user?.id,
+      action: "REDIRECT_MICROSOFT_LOGIN",
+      module: "microsoft-auth",
+      description: "Redirección a login de Microsoft",
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.redirect(authUrl);
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_REDIRECT_MICROSOFT_LOGIN",
+      module: "microsoft-auth",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     next(error);
   }
 };
@@ -79,9 +98,28 @@ export const handleMicrosoftCallback = async (req, res) => {
     const encoded = Buffer.from(JSON.stringify(responseJson)).toString("base64");
 
     // Redirigir a tu frontend con el JSON incrustado
+    await createLog({
+      user: user?._id,
+      action: "LOGIN_MICROSOFT",
+      module: "microsoft-auth",
+      description: `Login Microsoft correcto: ${user?.email}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
+
     res.redirect("https://ticketplatform.pages.dev/dashboard");
   } catch (error) {
     console.error("❌ Error en handleMicrosoftCallback:", error);
+    await createLog({
+      user: null,
+      action: "ERROR_LOGIN_MICROSOFT",
+      module: "microsoft-auth",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     return res.redirect("https://ticketplatform.pages.dev/login?error=auth_failed");
   }
 };

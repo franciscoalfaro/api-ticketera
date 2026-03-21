@@ -1,4 +1,4 @@
-import { createLog } from "../../core/services/log.service.js";
+import { createLog } from "../logs/logs.service.js";
 import { createAssetService, deleteAssetService, getAllAssetsService, getAssetByIdService, updateAssetService } from './asset.service.js'
 
 // Crear un activo
@@ -15,15 +15,18 @@ export const createAsset = async (req, res) => {
       description: `Nuevo equipo: ${asset.name}`,
       status: "success",
       method: "POST",
+      ip: req.clientIp,
     });
   } catch (error) {
     console.error(error);
     await createLog({
-      user: req.user.id,
+      user: req.user?.id,
       action: "ERROR_CREAR_ACTIVO",
       module: "assets",
       description: error.message,
       status: "error",
+      method: "POST",
+      ip: req.clientIp,
     });
     res.status(400).json({ status: "error", message: error.message });
   }
@@ -39,12 +42,31 @@ export const getAllAssets = async (req, res) => {
 
     const data = await getAllAssetsService(page, limit, status, search);
 
+    await createLog({
+      user: req.user?.id,
+      action: "LISTAR_ACTIVOS",
+      module: "assets",
+      description: `Listado de activos página ${page}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
+
     res.status(200).json({
       status: "success",
       ...data
     });
   } catch (error) {
     console.error(error);
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_LISTAR_ACTIVOS",
+      module: "assets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.status(500).json({
       status: "error",
       message: "Error al obtener los activos"
@@ -56,8 +78,26 @@ export const getAllAssets = async (req, res) => {
 export const getAssetById = async (req, res) => {
   try {
     const asset = await getAssetByIdService(req.params.id);
+    await createLog({
+      user: req.user?.id,
+      action: "OBTENER_ACTIVO",
+      module: "assets",
+      description: `Consulta de activo ${req.params.id}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.json({ status: "success", asset });
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_OBTENER_ACTIVO",
+      module: "assets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
     res.status(404).json({ status: "error", message: error.message });
   }
 };
@@ -67,15 +107,25 @@ export const updateAsset = async (req, res) => {
   try {
     const asset = await updateAssetService(req.params.id, req.body);
     await createLog({
-      user: req.user.id,
+      user: req.user?.id,
       action: "ACTUALIZAR_ACTIVO",
       module: "assets",
       description: `Equipo actualizado: ${asset.name}`,
       status: "success",
       method: "PUT",
+      ip: req.clientIp,
     });
     res.json({ status: "success", asset });
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_ACTUALIZAR_ACTIVO",
+      module: "assets",
+      description: error.message,
+      status: "error",
+      method: "PUT",
+      ip: req.clientIp,
+    });
     res.status(400).json({ status: "error", message: error.message });
   }
 };
@@ -85,14 +135,25 @@ export const deleteAsset = async (req, res) => {
   try {
     const result = await deleteAssetService(req.params.id);
     await createLog({
-      user: req.user.id,
+      user: req.user?.id,
       action: "ELIMINAR_ACTIVO",
       module: "assets",
       description: `Activo ID ${req.params.id} eliminado`,
       status: "success",
+      method: "DELETE",
+      ip: req.clientIp,
     });
     res.json({ status: "success", result });
   } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_ELIMINAR_ACTIVO",
+      module: "assets",
+      description: error.message,
+      status: "error",
+      method: "DELETE",
+      ip: req.clientIp,
+    });
     res.status(400).json({ status: "error", message: error.message });
   }
 };

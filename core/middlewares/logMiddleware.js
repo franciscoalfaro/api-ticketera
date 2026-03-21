@@ -1,4 +1,4 @@
-import { createLog } from "../services/log.service.js";
+import { createLog } from "../../modules/logs/logs.service.js";
 
 export const logAction = (module) => {
   return async (req, res, next) => {
