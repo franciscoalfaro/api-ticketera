@@ -22,6 +22,90 @@ import { generateDailyReport } from "../reports/reports.service.js";
 const ALLOWED_DOMAINS = ["@hotmail.cl", "@gmail.com", "@franciscoalfaro.cl"];
 
 // =====================================================
+// 🔹 FUNCIÓN PARA DETECTAR REBOTES DE CORREO
+// =====================================================
+const isBounceEmail = (headers, from, subject, html) => {
+  // Headers típicos de rebotes/NDR (Non-Delivery Reports)
+  const bounceHeaderPatterns = [
+    'X-Failed-Recipients',
+    'X-Mailer.*Mail Delivery System',
+    'X-Autoreply',
+    'X-Autoreply-From',
+    'List-Unsubscribe',
+    'Precedence.*bulk',
+    'Precedence.*auto_reply'
+  ];
+
+  // Remitentes típicos de rebotes
+  const bounceFromPatterns = [
+    'mailer-daemon',
+    'postmaster',
+    'noreply',
+    'no-reply',
+    'donotreply',
+    'do-not-reply',
+    'system.*reply',
+    'automated.*message',
+    'failure.*notice',
+    'undeliverable',
+    'delivery.*status.*notification'
+  ];
+
+  // Asuntos típicos de rebotes
+  const bounceSubjectPatterns = [
+    'Undeliverable:',
+    'Delivery Status Notification',
+    'Mail Delivery Failed',
+    'Returned mail:',
+    'Failure Notice',
+    'Delivery failure',
+    'Unable to deliver',
+    'Message rejection',
+    'Return notice',
+    'Bounceback'
+  ];
+
+  // 1. Verificar headers
+  const hasBouncheHeader = headers.some(h => 
+    bounceHeaderPatterns.some(pattern => 
+      new RegExp(pattern, 'i').test(h.name)
+    )
+  );
+
+  // 2. Verificar remitente
+  const hasFromBounce = bounceFromPatterns.some(pattern =>
+    new RegExp(pattern, 'i').test(from)
+  );
+
+  // 3. Verificar asunto
+  const hasSubjectBounce = bounceSubjectPatterns.some(pattern =>
+    new RegExp(pattern, 'i').test(subject)
+  );
+
+  // 4. Verificar contenido del cuerpo (errores de entrega)
+  const bounceBodyPatterns = [
+    'delivery failed',
+    'undeliverable',
+    'mail delivery failed',
+    'could not be delivered',
+    'failed to deliver',
+    'delivery was unsuccessful',
+    'rejected by',
+    'bounce',
+    'did not reach the following recipient',
+    'error.*recipient',
+    'invalid recipient',
+    'unknown user'
+  ];
+
+  const hasBodyBounce = bounceBodyPatterns.some(pattern =>
+    new RegExp(pattern, 'i').test(html)
+  );
+
+  return hasBouncheHeader || hasFromBounce || hasSubjectBounce || hasBodyBounce;
+};
+
+// =====================================================
 // 🔹 FUNCIÓN PARA DETECTAR SI ES CORREO DEL SISTEMA
 // =====================================================
 const isSystemEmail = (headers, from, subject, html) => {
@@ -109,6 +193,25 @@ export const processIncomingMail = async (mail) => {
     }
 
     const SUPPORT_MAILBOX = process.env.SUPPORT_MAILBOX;
+    
+    // 🔥 FILTRAR REBOTES DE CORREO
+    if (isBounceEmail(headers, from, originalSubject, rawHtml)) {
+      console.log(`⚠️ Rebote de correo ignorado: ${cleanSubject(originalSubject).substring(0, 50)}... desde ${from}`);
+      
+      // Marcar como leído inmediatamente para que no sea procesado de nuevo
+      try {
+        await markAsRead(mail.id);
+      } catch (error) {
+        console.warn("⚠️ No se pudo marcar rebote como leído:", error.message);
+      }
+      
+      return {
+        success: false,
+        message: "Rebote de correo ignorado",
+        action: "bounce_ignored",
+        from
+      };
+    }
     
     // 🔥 FILTRAR CORREOS DEL SISTEMA
     if (isSystemEmail(headers, from, originalSubject, rawHtml)) {
@@ -318,6 +421,7 @@ export const processIncomingEmails = async () => {
     let createdCount = 0;
     let updatedCount = 0;
     let ignoredCount = 0;
+    let bounceCount = 0;
 
     for (const mail of emails) {
       console.log(`📧 Procesando: ${mail.subject?.substring(0, 50)}...`);
@@ -333,12 +437,14 @@ export const processIncomingEmails = async () => {
           updatedCount++;
         } else if (result.action === "ignored") {
           ignoredCount++;
+        } else if (result.action === "bounce_ignored") {
+          bounceCount++;
         }
       }
       
       // Solo marcar como leído si no es un correo del sistema
-      // (los correos del sistema ya se marcan como leídos en processIncomingMail)
-      if (result && result.action !== "ignored") {
+      // (los correos del sistema y rebotes ya se marcan como leídos en processIncomingMail)
+      if (result && result.action !== "ignored" && result.action !== "bounce_ignored") {
         try {
           await markAsRead(mail.id);
         } catch (error) {
@@ -350,7 +456,7 @@ export const processIncomingEmails = async () => {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
-    console.log(`📊 Resultados: ${createdCount} creados, ${updatedCount} actualizados, ${ignoredCount} ignorados`);
+    console.log(`📊 Resultados: ${createdCount} creados, ${updatedCount} actualizados, ${ignoredCount} ignorados, ${bounceCount} rebotes`);
     
     return {
       success: true,
@@ -358,7 +464,8 @@ export const processIncomingEmails = async () => {
         total: emails.length,
         created: createdCount,
         updated: updatedCount,
-        ignored: ignoredCount
+        ignored: ignoredCount,
+        bounces: bounceCount
       },
       results
     };
