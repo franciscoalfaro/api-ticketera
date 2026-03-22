@@ -49,5 +49,23 @@ const userSchema = new mongoose.Schema({
   }
 });
 
+// =====================================================
+// 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
+// =====================================================
+
+// Índices únicos
+userSchema.index({ email: 1 }, { unique: true });                    // Búsqueda por email (requerido)
+userSchema.index({ microsoftId: 1 }, { unique: true, sparse: true }); // Microsoft OAuth
+
+// Índices para búsquedas comunes
+userSchema.index({ isDeleted: 1 });           // Filtrar usuarios eliminados
+userSchema.index({ type: 1 });                // Filtrar por tipo (local/microsoft)
+userSchema.index({ area: 1 });                // Usuarios por área
+userSchema.index({ role: 1 });                // Usuarios por rol
+userSchema.index({ isDeleted: 1, type: 1 }); // Usuarios activos por tipo
+
+// Índice temporal
+userSchema.index({ createdAt: -1 });          // Ordenamiento temporal
+
 const User = mongoose.model("User", userSchema);
 export default User;

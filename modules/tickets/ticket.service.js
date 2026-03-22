@@ -38,29 +38,44 @@ export const getUserById = async (id) => {
 
 
 
+// =====================================================
+// 🔹 GENERADOR DE CÓDIGOS DE TICKET ROBUSTO
+// =====================================================
 class TicketCodeGenerator {
   constructor() {
-    this.batchSize = 1000;
-    this.currentBatch = {
-      min: 0,
-      max: 0,
-      current: 0
-    };
     this.initialized = false;
+    this.lastValue = 0;
   }
 
   async initialize() {
     if (this.initialized) return;
 
-    const counter = await Counter.findOne({ name: "tickets" });
-    if (counter) {
-      this.currentBatch = {
-        min: counter.value - this.batchSize + 1,
-        max: counter.value,
-        current: counter.value - this.batchSize + 1
-      };
-    } else {
-      await Counter.create({ name: "tickets", value: 0 });
+    try {
+      // Verificar si el counter existe (indica si la BD tiene datos históricos)
+      const counter = await Counter.findOne({ name: "tickets" });
+      
+      if (counter) {
+        // BD existente: sincronizar con el counter existente
+        this.lastValue = counter.value;
+        console.log(`✅ Generador inicializado con counter existente. Próximo: TCK-${String(this.lastValue + 1).padStart(4, "0")}`);
+      } else {
+        // BD nueva: comenzar desde 0
+        await Counter.create({ name: "tickets", value: 0 });
+        this.lastValue = 0;
+        console.log(`✅ Generador inicializado en BD nueva. Comenzará desde: TCK-0001`);
+      }
+    } catch (error) {
+      console.warn("⚠️ Error inicializando generador:", error.message);
+      // Si hay error, crear counter con valor 0 para no afectar
+      try {
+        await Counter.findOneAndUpdate(
+          { name: "tickets" },
+          { $setOnInsert: { value: 0 } },
+          { upsert: true }
+        );
+      } catch (e) {
+        console.error("❌ Error crítico inicializando counter:", e.message);
+      }
     }
 
     this.initialized = true;
@@ -71,29 +86,38 @@ class TicketCodeGenerator {
       await this.initialize();
     }
 
-    // Si el batch está agotado o casi agotado (10% restante)
-    if (this.currentBatch.current >= this.currentBatch.max - (this.batchSize * 0.1)) {
-      await this.loadNewBatch();
+    let ticketCode;
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    // Intentar generar un código único
+    while (attempts < maxAttempts) {
+      // Incrementar el counter
+      const counter = await Counter.findOneAndUpdate(
+        { name: "tickets" },
+        { $inc: { value: 1 } },
+        { new: true, upsert: true }
+      );
+
+      const ticketNumber = counter.value;
+      ticketCode = `TCK-${String(ticketNumber).padStart(4, "0")}`;
+
+      // Verificar que no exista un ticket con este código
+      const existingTicket = await Ticket.findOne({ code: ticketCode }).lean();
+
+      if (!existingTicket) {
+        // Código único encontrado
+        this.lastValue = ticketNumber;
+        return ticketCode;
+      }
+
+      // Si existe, intentar de nuevo
+      console.warn(`⚠️ Código ${ticketCode} ya existe, generando nuevo...`);
+      attempts++;
     }
 
-    const ticketNumber = this.currentBatch.current++;
-    return `TCK-${String(ticketNumber).padStart(4, "0")}`;
-  }
-
-  async loadNewBatch() {
-    const counter = await Counter.findOneAndUpdate(
-      { name: "tickets" },
-      { $inc: { value: this.batchSize } },
-      { new: true, upsert: true }
-    );
-
-    this.currentBatch = {
-      min: counter.value - this.batchSize + 1,
-      max: counter.value,
-      current: counter.value - this.batchSize + 1
-    };
-
-    console.log(`Nuevo batch de tickets cargado: ${this.currentBatch.min}-${this.currentBatch.max}`);
+    // Si llegamos aquí, algo está muy mal
+    throw new Error(`No se pudo generar un código único después de ${maxAttempts} intentos`);
   }
 }
 

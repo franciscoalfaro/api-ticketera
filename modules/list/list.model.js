@@ -50,5 +50,21 @@ const listSchema = new mongoose.Schema({
     }
 });
 
+// =====================================================
+// 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
+// =====================================================
+
+// Búsqueda por nombre (muy común)
+listSchema.index({ name: 1 });                    // Búsqueda por nombre exacto
+listSchema.index({ type: 1 });                    // Búsqueda por tipo
+listSchema.index({ isDeleted: 1 });               // Filtrar eliminadas
+
+// Índices compuestos para búsquedas específicas
+listSchema.index({ name: 1, isDeleted: 1 });      // Listas activas por nombre (más usado)
+listSchema.index({ type: 1, isDeleted: 1 });      // Listas activas por tipo
+
+// Índice temporal
+listSchema.index({ createdAt: -1 });              // Ordenamiento temporal
+
 const List = mongoose.model("List", listSchema);
 export default List;

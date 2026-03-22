@@ -58,7 +58,24 @@ const assetSchema = new mongoose.Schema({
     },
 });
 
-assetSchema.index({ code: 1, name: 1 });
+// =====================================================
+// 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
+// =====================================================
+
+// Índices únicos para identificadores
+assetSchema.index({ code: 1 }, { unique: true });                    // Código de asset
+assetSchema.index({ serialNumber: 1 }, { unique: true, sparse: true }); // Serial number
+
+// Índices para búsquedas comunes
+assetSchema.index({ owner: 1 });                          // Assets por propietario
+assetSchema.index({ status: 1 });                         // Assets por estado
+assetSchema.index({ isDeleted: 1 });                      // Filtrar eliminados
+assetSchema.index({ createdAt: -1 });                     // Ordenamiento temporal
+
+// Índices compuestos para búsquedas específicas
+assetSchema.index({ status: 1, isDeleted: 1 });           // Assets activos por estado
+assetSchema.index({ owner: 1, status: 1 });               // Assets del usuario por estado
+assetSchema.index({ code: 1, name: 1 });                  // Búsqueda dual
 
 const Asset = mongoose.model("Asset", assetSchema);
 export default Asset;

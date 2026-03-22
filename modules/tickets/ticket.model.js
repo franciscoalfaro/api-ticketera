@@ -55,5 +55,28 @@ ticketSchema.pre("save", function (next) {
   next();
 });
 
+// =====================================================
+// 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
+// =====================================================
+
+// Índice único para código de ticket (ya existe por unique: true, pero explícito)
+ticketSchema.index({ code: 1 }, { unique: true });
+
+// Índices para búsquedas y filtrados comunes
+ticketSchema.index({ isDeleted: 1, createdAt: -1 });      // Listar tickets (ordenado por fecha)
+ticketSchema.index({ assignedTo: 1, status: 1 });         // Tickets por agente y estado
+ticketSchema.index({ requester: 1, createdAt: -1 });      // Tickets del cliente (ordenado)
+ticketSchema.index({ status: 1, isDeleted: 1 });          // Filtrar por estado
+ticketSchema.index({ priority: 1, createdAt: -1 });       // Tickets por prioridad
+ticketSchema.index({ source: 1 });                        // Tickets por medio de reporte
+ticketSchema.index({ createdAt: -1 });                    // Ordenamiento temporal
+
+// Índice compuesto para dashboards y reportes
+ticketSchema.index({ assignedTo: 1, status: 1, createdAt: -1 }); // Dashboard de agentes
+ticketSchema.index({ department: 1, status: 1, createdAt: -1 }); // Por departamento
+
+// Índices para búsquedas de texto (opcional, solo si se implementa full-text search)
+// ticketSchema.index({ subject: "text", description: "text" });
+
 const Ticket = mongoose.model("Ticket", ticketSchema);
 export default Ticket;

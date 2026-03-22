@@ -21,5 +21,16 @@ const enterpriseSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+// =====================================================
+// 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
+// =====================================================
+
+// Índice único para nombre
+enterpriseSchema.index({ name: 1 }, { unique: true });
+
+// Índices para búsquedas comunes
+enterpriseSchema.index({ isDeleted: 1 });        // Filtrar eliminadas
+enterpriseSchema.index({ createdAt: -1 });      // Ordenamiento temporal
+
 const Enterprise = mongoose.model("Enterprise", enterpriseSchema);
 export default Enterprise;
