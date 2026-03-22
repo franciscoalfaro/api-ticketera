@@ -102,7 +102,7 @@ export const getUser = async (req, res) => {
 // Obtener un usuario por token
 export const getUserProfile = async (req, res) => {
   const idProfile = req.user.id
-  console.log("Solicitud de perfil de usuario recibida.",req.user);
+  console.log("Solicitud de perfil de usuario recibida.", req.user);
   console.log("ID del perfil solicitado:", idProfile);
 
   try {
@@ -148,7 +148,7 @@ export const getUserProfile = async (req, res) => {
 // Crear o registrar usuarios por el agente o administrador
 export const createUser = async (req, res) => {
   try {
-    const { name, email, password, role,area } = req.body;
+    const { name, email, password, role, area } = req.body;
     const user = await createUserService({ name, email, password, role, area });
     await createLog({
       user: req.user?.id,
@@ -223,17 +223,26 @@ export const updateUser = async (req, res) => {
 // Actualizar usuario
 export const activateUser = async (req, res) => {
   try {
-    const updatedUser = await activateUserService(req.params.id);
+    const { id } = req.params;
+
+    if (!/^[a-f\d]{24}$/i.test(id)) {
+      return res.status(400).json({
+        status: "error",
+        message: "ID de usuario inválido"
+      });
+    }
+
+    const updatedUser = await activateUserService(id);
     await createLog({
       user: req.user?.id,
       action: "ACTIVAR_USUARIO",
       module: "users",
-      description: `Usuario activado ${req.params.id}`,
+      description: `Usuario activado ${id}`,
       status: "success",
-      method: "PATCH",
+      method: "PUT",
       ip: req.clientIp,
     });
-    res.json({ status: "success", user: updatedUser });
+    res.json({ status: "success", message: updatedUser.message });
   } catch (error) {
     console.error(error);
     await createLog({
@@ -242,9 +251,14 @@ export const activateUser = async (req, res) => {
       module: "users",
       description: error.message,
       status: "error",
-      method: "PATCH",
+      method: "PUT",
       ip: req.clientIp,
     });
+
+    if (error.message === "Usuario no encontrado") {
+      return res.status(404).json({ status: "error", message: error.message });
+    }
+
     res.status(400).json({ status: "error", message: error.message });
   }
 };
@@ -257,8 +271,14 @@ export const deleteUser = async (req, res) => {
   try {
     const { id } = req.params;
 
+    //bucar el role por el id del usuario autenticado y verificar si es admin o owner para permitir eliminar usuarios
+    const userRole = await getUserById(req.user.id).then(user => user.role).catch(err => {
+      console.error("Error obteniendo rol del usuario:", err);
+      return null;
+    });
+
     // Verificar rol del usuario autenticado
-    if (!req.user || req.user.role !== "admin") {
+    if (userRole.value !== "admin" && userRole.value !== "owner") {
       await createLog({
         user: req.user?.id,
         action: "ERROR_ELIMINAR_USUARIO",

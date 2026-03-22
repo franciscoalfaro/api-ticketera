@@ -100,7 +100,7 @@ export const createTicket = async (req, res) => {
       user: req.user?.id || requester,
       action: "CREAR_TICKET",
       module: "tickets",
-      description: `Ticket creado: ${ticket.code}`,
+      description: `Ticket creado: ${ticket.code} por usuario ${req.user?.name}`,
       status: "success",
       method: "POST",
       ip: req.clientIp,
@@ -142,12 +142,12 @@ export const getTicketById = async (req, res) => {
       });
       return res.status(404).json({ status: "error", message: "Ticket no encontrado" });
     }
-
+    // guardar dentro de la descripcion el id del usuario que hizo la consulta y el nombre del usuario
     await createLog({
       user: req.user?.id,
       action: "OBTENER_TICKET",
       module: "tickets",
-      description: `Consulta ticket ${id}`,
+      description: `Consulta ticket ${ticket.code} por usuario ${req.user?.name}`,
       status: "success",
       method: "GET",
       ip: req.clientIp,
@@ -235,12 +235,12 @@ export const updateTicket = async (req, res) => {
     const userId = req.user.id;
 
     const updated = await TicketService.updateTicketService(id, userId, req.body);
-
+    console.log("Ticket actualizado:", updated);
     await createLog({
       user: userId,
       action: "ACTUALIZAR_TICKET",
       module: "tickets",
-      description: `Ticket actualizado ${id}`,
+      description: `Ticket ${updated.code} actualizado por usuario ${req.user?.name}`,
       status: "success",
       method: "PUT",
       ip: req.clientIp,

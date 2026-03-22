@@ -1,24 +1,20 @@
 import express from "express";
-import {  generateReportToday, getReport, getReportBetweenDates, getLast7Days, generatePDFReport } from "./reports.controller.js";
-// import { logAction } from "../../core/middlewares/logMiddleware.js";
+import {
+	exportAgentOperationalDashboardExcelController,
+	exportAgentOperationalDashboardPdfController,
+	getAgentOperationalDashboardController,
+} from "./reports.controller.js";
+import { auth } from "../../core/middlewares/authMiddleware.js";
+
 
 const router = express.Router();
-// router.use(logAction("report"));
+router.use(auth);
 
-// Generar reporte manual del día de los ticket creados hoy
-router.get("/generate/today", generateReportToday);
-
-// Reporte de un día específico
-router.get("/:date", getReport);
-
-// Reporte por rangos (POST con body)
-router.post("/range", getReportBetweenDates);
-
-// Últimos 7 días
-router.get("/range/last7days", getLast7Days);
-
-//pdf Reporte por rangos (POST con body)
-router.post("/pdf", generatePDFReport);
+// Dashboard operativo de agentes (incluye carga activa, pendientes y promedio cierre mensual)
+router.post("/dashboard/agents/operational", getAgentOperationalDashboardController);
+router.get("/dashboard/agents/operational", getAgentOperationalDashboardController);
+router.get("/dashboard/agents/operational/export/pdf", exportAgentOperationalDashboardPdfController);
+router.get("/dashboard/agents/operational/export/excel", exportAgentOperationalDashboardExcelController);
 
 
 export default router;

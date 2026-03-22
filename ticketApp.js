@@ -25,6 +25,7 @@ import mailRoutes from './modules/mail-processor/mail.routes.js';
 import enterpriseRoutes from './modules/enterprise/enterprise.routes.js';
 import reportRoutes from "./modules/reports/reports.routes.js";
 import uploadRoutes from './modules/uploads/uploads.routes.js';
+import logsRoutes from './modules/logs/logs.routes.js';
 
 import { processUnreadEmails } from './modules/mail-processor/mail.listener.js';
 
@@ -53,10 +54,11 @@ app.use(cookieParser());
 // 🔹 CORS CONFIG
 // ==============================
 const allowedOrigins = [
-  'https://franalfaro.ddns.net',
+  'https://api.franciscoalfaro.cl',
   'https://ticketplatform.pages.dev',   // ✔️ corregido
   'http://localhost:5173',
-  'http://localhost:3000'
+  'http://localhost:3000',
+  'https://ais-dev-vxxmwmc6sojgfzndo6emnf-26788392421.us-west2.run.apphttps://ais-dev-vxxmwmc6sojgfzndo6emnf-26788392421.us-west2.run.app'
 ];
 
 const corsOptions = {
@@ -113,6 +115,7 @@ app.use('/api/area', areasRoutes);
 app.use('/api/getemail', mailRoutes);
 app.use('/api/enterprise', enterpriseRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/logs", logsRoutes);
 
 // ==============================
 // 🔹 Seeds iniciales

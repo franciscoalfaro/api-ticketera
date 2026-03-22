@@ -1,189 +1,162 @@
 // # Modulo de Reporte #//
 import { createLog } from "../logs/logs.service.js";
-
-
-import { generatePDFReportService } from "./reports.pdf.services.js";
 import {
-  generateDailyReport,
-  getReportByDate,
-  getRangeReport,
-  getLast7DaysReport
+  generateDashboardOperationalExcelService,
+  generateDashboardOperationalPdfService,
+} from "./reports.export.services.js";
+import {
+  getAgentOperationalDashboard
 } from "./reports.service.js";
 
+const resolveDashboardPeriodParams = (req) => {
+  const monthValue = req.body?.month ?? req.query?.month;
+  const yearValue = req.body?.year ?? req.query?.year;
+  const dayFromValue = req.body?.dayFrom ?? req.query?.dayFrom ?? req.body?.fromDay ?? req.query?.fromDay;
+  const dayToValue = req.body?.dayTo ?? req.query?.dayTo ?? req.body?.toDay ?? req.query?.toDay;
 
-// 📌 Genera reporte del día actual
-export const generateReportToday = async (req, res) => {
-  try {
-    const report = await generateDailyReport();
-    await createLog({
-      user: req.user?.id,
-      action: "GENERAR_REPORTE_DIA",
-      module: "reports",
-      description: "Reporte diario generado",
-      status: "success",
-      method: "GET",
-      ip: req.clientIp,
-    });
-    return res.json({ status: "success", report });
-  } catch (error) {
-    await createLog({
-      user: req.user?.id,
-      action: "ERROR_GENERAR_REPORTE_DIA",
-      module: "reports",
-      description: error.message,
-      status: "error",
-      method: "GET",
-      ip: req.clientIp,
-    });
-    return res.status(500).json({ status: "error", message: error.message });
+  const month = monthValue !== undefined ? Number(monthValue) : undefined;
+  const year = yearValue !== undefined ? Number(yearValue) : undefined;
+  const dayFrom = dayFromValue !== undefined ? Number(dayFromValue) : undefined;
+  const dayTo = dayToValue !== undefined ? Number(dayToValue) : undefined;
+
+  return { month, year, dayFrom, dayTo, raw: { monthValue, yearValue, dayFromValue, dayToValue } };
+};
+
+const validateDashboardPeriodParams = ({ month, year, dayFrom, dayTo }) => {
+  if (month !== undefined && (!Number.isInteger(month) || month < 1 || month > 12)) {
+    return "El parámetro 'month' debe ser un entero entre 1 y 12.";
   }
+
+  if (year !== undefined && (!Number.isInteger(year) || year < 2000 || year > 2100)) {
+    return "El parámetro 'year' debe ser un entero válido entre 2000 y 2100.";
+  }
+
+  if (dayFrom !== undefined && (!Number.isInteger(dayFrom) || dayFrom < 1 || dayFrom > 31)) {
+    return "El parámetro 'dayFrom' debe ser un entero entre 1 y 31.";
+  }
+
+  if (dayTo !== undefined && (!Number.isInteger(dayTo) || dayTo < 1 || dayTo > 31)) {
+    return "El parámetro 'dayTo' debe ser un entero entre 1 y 31.";
+  }
+
+  const now = new Date();
+  const resolvedMonth = Number.isInteger(month) ? month : now.getUTCMonth() + 1;
+  const resolvedYear = Number.isInteger(year) ? year : now.getUTCFullYear();
+  const daysInMonth = new Date(Date.UTC(resolvedYear, resolvedMonth, 0)).getUTCDate();
+
+  if (dayFrom !== undefined && dayFrom > daysInMonth) {
+    return `El parámetro 'dayFrom' no puede ser mayor a ${daysInMonth} para ${resolvedMonth}/${resolvedYear}.`;
+  }
+
+  if (dayTo !== undefined && dayTo > daysInMonth) {
+    return `El parámetro 'dayTo' no puede ser mayor a ${daysInMonth} para ${resolvedMonth}/${resolvedYear}.`;
+  }
+
+  return null;
 };
 
 
-// 📌 Obtener reporte de un día (GET)
-export const getReport = async (req, res) => {
+// 📌 Dashboard operativo de agentes
+export const getAgentOperationalDashboardController = async (req, res) => {
   try {
-    const { date } = req.params;
-    const report = await getReportByDate(date);
-    await createLog({
-      user: req.user?.id,
-      action: "OBTENER_REPORTE_DIA",
-      module: "reports",
-      description: `Consulta reporte fecha ${date}`,
-      status: "success",
-      method: "GET",
-      ip: req.clientIp,
-    });
-    return res.json({ status: "success", report });
-  } catch (error) {
-    await createLog({
-      user: req.user?.id,
-      action: "ERROR_OBTENER_REPORTE_DIA",
-      module: "reports",
-      description: error.message,
-      status: "error",
-      method: "GET",
-      ip: req.clientIp,
-    });
-    return res.status(500).json({ status: "error", message: error.message });
-  }
-};
+    const { month, year, dayFrom, dayTo, raw } = resolveDashboardPeriodParams(req);
 
-
-// 📌 Obtener reporte entre fechas (POST con body)
-export const getReportBetweenDates = async (req, res) => {
-  try {
-    const { from, to } = req.body;
-    console.log(req.body);
-
-    if (!from || !to) {
-      return res.status(400).json({
-        status: "error",
-        message: "Los parámetros 'from' y 'to' son obligatorios en el body."
-      });
+    const periodError = validateDashboardPeriodParams({ month, year, dayFrom, dayTo });
+    if (periodError) {
+      return res.status(400).json({ status: "error", message: periodError });
     }
 
-    const data = await getRangeReport(from, to);
+    const data = await getAgentOperationalDashboard(month, year, dayFrom, dayTo);
 
     await createLog({
       user: req.user?.id,
-      action: "OBTENER_REPORTE_RANGO",
+      action: "OBTENER_DASHBOARD_OPERATIVO_AGENTES",
       module: "reports",
-      description: `Consulta reporte entre ${from} y ${to}`,
+      description: `Consulta dashboard operativo agentes periodo ${data.period.dayFrom}-${data.period.dayTo} mes ${data.period.month}/${data.period.year}`,
       status: "success",
-      method: "POST",
+      method: req.method,
       ip: req.clientIp,
     });
 
     return res.json({ status: "success", ...data });
-
   } catch (error) {
     await createLog({
       user: req.user?.id,
-      action: "ERROR_OBTENER_REPORTE_RANGO",
+      action: "ERROR_OBTENER_DASHBOARD_OPERATIVO_AGENTES",
       module: "reports",
       description: error.message,
       status: "error",
-      method: "POST",
+      method: req.method,
       ip: req.clientIp,
     });
+
     return res.status(500).json({ status: "error", message: error.message });
   }
 };
 
-
-// 📌 Últimos 7 días
-export const getLast7Days = async (req, res) => {
+export const exportAgentOperationalDashboardPdfController = async (req, res) => {
   try {
-    const data = await getLast7DaysReport();
-    await createLog({
-      user: req.user?.id,
-      action: "OBTENER_REPORTE_7_DIAS",
-      module: "reports",
-      description: "Consulta de reporte últimos 7 días",
-      status: "success",
-      method: "GET",
-      ip: req.clientIp,
-    });
-    return res.json({ status: "success", ...data });
-  } catch (error) {
-    await createLog({
-      user: req.user?.id,
-      action: "ERROR_OBTENER_REPORTE_7_DIAS",
-      module: "reports",
-      description: error.message,
-      status: "error",
-      method: "GET",
-      ip: req.clientIp,
-    });
-    return res.status(500).json({ status: "error", message: error.message });
-  }
-};
+    const { month, year, dayFrom, dayTo } = resolveDashboardPeriodParams(req);
+    const periodError = validateDashboardPeriodParams({ month, year, dayFrom, dayTo });
 
-// 📌 Generar reporte en PDF  
-
-
-export const generatePDFReport = async (req, res) => {
-  try {
-    const { from, to } = req.body;
-
-    if (!from || !to) {
-      await createLog({
-        user: req.user?.id,
-        action: "ERROR_GENERAR_REPORTE_PDF",
-        module: "reports",
-        description: "Parámetros from/to faltantes",
-        status: "error",
-        method: "POST",
-        ip: req.clientIp,
-      });
-
-      return res.status(400).json({
-        status: "error",
-        message: "Debe enviar from y to"
-      });
+    if (periodError) {
+      return res.status(400).json({ status: "error", message: periodError });
     }
 
     await createLog({
       user: req.user?.id,
-      action: "GENERAR_REPORTE_PDF",
+      action: "DESCARGAR_DASHBOARD_OPERATIVO_PDF",
       module: "reports",
-      description: `Generación PDF entre ${from} y ${to}`,
+      description: "Descarga PDF de dashboard operativo de agentes",
       status: "success",
-      method: "POST",
+      method: req.method,
       ip: req.clientIp,
     });
 
-    // delega 100% la generación del PDF
-    await generatePDFReportService({ from, to, res });
+    await generateDashboardOperationalPdfService({ month, year, dayFrom, dayTo, res });
   } catch (error) {
     await createLog({
       user: req.user?.id,
-      action: "ERROR_GENERAR_REPORTE_PDF",
+      action: "ERROR_DESCARGAR_DASHBOARD_OPERATIVO_PDF",
       module: "reports",
       description: error.message,
       status: "error",
-      method: "POST",
+      method: req.method,
+      ip: req.clientIp,
+    });
+
+    return res.status(500).json({ status: "error", message: error.message });
+  }
+};
+
+export const exportAgentOperationalDashboardExcelController = async (req, res) => {
+  try {
+    const { month, year, dayFrom, dayTo } = resolveDashboardPeriodParams(req);
+    const periodError = validateDashboardPeriodParams({ month, year, dayFrom, dayTo });
+
+    if (periodError) {
+      return res.status(400).json({ status: "error", message: periodError });
+    }
+
+    await createLog({
+      user: req.user?.id,
+      action: "DESCARGAR_DASHBOARD_OPERATIVO_EXCEL",
+      module: "reports",
+      description: "Descarga Excel de dashboard operativo de agentes",
+      status: "success",
+      method: req.method,
+      ip: req.clientIp,
+    });
+
+    await generateDashboardOperationalExcelService({ month, year, dayFrom, dayTo, res });
+  } catch (error) {
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_DESCARGAR_DASHBOARD_OPERATIVO_EXCEL",
+      module: "reports",
+      description: error.message,
+      status: "error",
+      method: req.method,
       ip: req.clientIp,
     });
 

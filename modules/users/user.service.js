@@ -195,7 +195,7 @@ export const activateUserService = async (id) => {
   if (!user) throw new Error("Usuario no encontrado");
 
   user.isDeleted = false;
-  user.deletedAt = new Date();
+  user.deletedAt = null;
   await user.save();
 
   return { status: "success", message: "Usuario activado nuevamente" };

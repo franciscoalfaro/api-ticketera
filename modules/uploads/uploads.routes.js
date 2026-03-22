@@ -5,8 +5,11 @@ import { auth } from "../../core/middlewares/authMiddleware.js";
 
 const router = Router();
 const uploadsRoot = path.resolve(process.cwd(), "uploads");
+router.use(auth);
 
-router.get("/*path", auth, (req, res) => {
+
+
+router.get("/*path", (req, res) => {
   try {
     const pathParam = req.params.path;
     const requestedPath = Array.isArray(pathParam)

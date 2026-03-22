@@ -5,6 +5,7 @@ import { createLog } from "../logs/logs.service.js";
 export const getAllListsController = async (req, res) => {
   try {
     const lists = await getAllListsService();
+    console.log("Listas obtenidas:", lists);
     await createLog({
       user: req.user?.id,
       action: "LISTAR_LISTAS",
