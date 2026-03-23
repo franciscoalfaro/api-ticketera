@@ -59,9 +59,6 @@ ticketSchema.pre("save", function (next) {
 // 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
 // =====================================================
 
-// Índice único para código de ticket (ya existe por unique: true, pero explícito)
-ticketSchema.index({ code: 1 }, { unique: true });
-
 // Índices para búsquedas y filtrados comunes
 ticketSchema.index({ isDeleted: 1, createdAt: -1 });      // Listar tickets (ordenado por fecha)
 ticketSchema.index({ assignedTo: 1, status: 1 });         // Tickets por agente y estado

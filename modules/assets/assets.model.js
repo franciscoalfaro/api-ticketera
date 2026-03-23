@@ -62,10 +62,6 @@ const assetSchema = new mongoose.Schema({
 // 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
 // =====================================================
 
-// Índices únicos para identificadores
-assetSchema.index({ code: 1 }, { unique: true });                    // Código de asset
-assetSchema.index({ serialNumber: 1 }, { unique: true, sparse: true }); // Serial number
-
 // Índices para búsquedas comunes
 assetSchema.index({ owner: 1 });                          // Assets por propietario
 assetSchema.index({ status: 1 });                         // Assets por estado

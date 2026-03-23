@@ -13,7 +13,4 @@ const CounterSchema = new mongoose.Schema(
 // 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
 // =====================================================
 
-// Índice único para búsqueda por nombre (crítico)
-CounterSchema.index({ name: 1 }, { unique: true });
-
 export default mongoose.model("Counter", CounterSchema);

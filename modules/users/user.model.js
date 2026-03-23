@@ -53,10 +53,6 @@ const userSchema = new mongoose.Schema({
 // 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
 // =====================================================
 
-// Índices únicos
-userSchema.index({ email: 1 }, { unique: true });                    // Búsqueda por email (requerido)
-userSchema.index({ microsoftId: 1 }, { unique: true, sparse: true }); // Microsoft OAuth
-
 // Índices para búsquedas comunes
 userSchema.index({ isDeleted: 1 });           // Filtrar usuarios eliminados
 userSchema.index({ type: 1 });                // Filtrar por tipo (local/microsoft)

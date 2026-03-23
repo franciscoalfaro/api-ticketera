@@ -29,9 +29,6 @@ const areaSchema = new mongoose.Schema({
 // 🔹 ÍNDICES PARA OPTIMIZACIÓN DE PERFORMANCE
 // =====================================================
 
-// Índice único para nombre
-areaSchema.index({ name: 1 }, { unique: true });
-
 // Índices para búsquedas comunes
 areaSchema.index({ isDeleted: 1 });           // Filtrar eliminadas
 areaSchema.index({ createdAt: -1 });          // Ordenamiento temporal
