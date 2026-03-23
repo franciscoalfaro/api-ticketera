@@ -102,8 +102,6 @@ export const getUser = async (req, res) => {
 // Obtener un usuario por token
 export const getUserProfile = async (req, res) => {
   const idProfile = req.user.id
-  console.log("Solicitud de perfil de usuario recibida.", req.user);
-  console.log("ID del perfil solicitado:", idProfile);
 
   try {
     const user = await getUserById(idProfile);
@@ -128,7 +126,15 @@ export const getUserProfile = async (req, res) => {
       method: "GET",
       ip: req.clientIp,
     });
-    res.json({ status: "success", user });
+
+    const sessionUser = {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role?.value || user.role || null,
+    };
+
+    res.json({ status: "success", user, sessionUser, message: "Perfil obtenido correctamente" });
   } catch (error) {
     console.error(error);
     await createLog({

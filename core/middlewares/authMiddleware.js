@@ -45,7 +45,7 @@ export const auth = async (req, res, next) => {
 
         // Generar nuevo access token
         const newAccessToken = createToken({ id: refreshPayload.id });
-        res.cookie("access_token", newAccessToken, { httpOnly: true, secure: true, sameSite: "strict" });
+        res.cookie("access_token", newAccessToken, { httpOnly: true, secure: true, sameSite: "None" });
 
         // Actualizar la solicitud con el nuevo access token
         req.cookies.access_token = newAccessToken;

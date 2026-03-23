@@ -1,0 +1,99 @@
+RESUMEN PARA VALIDACIÓN FRONTEND
+Proyecto: API Ticketera
+Base URL API: https://api.franciscoalfaro.cl/api-ticketera/api
+
+====================================================
+1) LOGIN NORMAL (LOCAL)
+Endpoint: POST /auth/login
+====================================================
+
+Request esperado (body JSON):
+{
+  "email": "usuario@dominio.com",
+  "password": "******"
+}
+
+Comportamiento backend:
+- Si credenciales correctas:
+  - Set-Cookie: access_token (HttpOnly, secure, sameSite=None)
+  - Set-Cookie: refresh_token (HttpOnly, secure, sameSite=None)
+  - Responde JSON al frontend
+
+Response success (status 200):
+{
+  "status": "success",
+  "user": {
+    ...datos usuario...
+  },
+  "message": "Login correcto"
+}
+
+Response error (ejemplo):
+{
+  "status": "error",
+  "message": "..."
+}
+
+Puntos de validación en front:
+- Debe esperar JSON en el body.
+- Debe usar credenciales con cookies (credentials: 'include').
+- Si status === "success", tomar user del body.
+
+====================================================
+2) LOGIN MICROSOFT (OAUTH)
+Endpoints:
+- GET /microsoft/login
+- GET /microsoft/callback
+====================================================
+
+Flujo backend actual:
+1. Front navega a /microsoft/login
+2. Backend redirige a Microsoft
+3. Microsoft vuelve a /microsoft/callback?code=...
+4. Backend crea/actualiza usuario, setea cookies y redirige al front
+
+Comportamiento backend en callback:
+- Set-Cookie: access_token (HttpOnly, secure, sameSite=None)
+- Set-Cookie: refresh_token (HttpOnly, secure, sameSite=None)
+- NO devuelve JSON al front
+- Hace redirect a:
+  https://ticketplatform.pages.dev/dashboard
+
+En caso de error:
+- Redirect a:
+  https://ticketplatform.pages.dev/login?error=auth_failed
+
+IMPORTANTE:
+- Aunque en el código se arma responseJson, NO se envía en la respuesta final.
+- El front debe tratar este flujo como navegación/redirect, no como fetch JSON.
+
+====================================================
+DIFERENCIA CLAVE ENTRE AMBOS
+====================================================
+
+LOGIN NORMAL:
+- Respuesta principal: JSON
+- Front consume body: SI
+
+LOGIN MICROSOFT:
+- Respuesta principal: REDIRECT
+- Front consume body: NO
+
+====================================================
+CHECKLIST RÁPIDO FRONTEND
+====================================================
+
+[ ] Login local usa fetch/axios con credentials: include
+[ ] Login local parsea JSON { status, user, message }
+[ ] Login Microsoft se maneja como redirect (window.location)
+[ ] Al volver a /dashboard, front obtiene perfil con endpoint protegido
+[ ] Si viene ?error=auth_failed, mostrar mensaje de error
+
+====================================================
+SUGERENCIA TÉCNICA
+====================================================
+
+Para unificar UX entre ambos logins, el front puede:
+- Después del redirect de Microsoft a /dashboard,
+- Llamar a un endpoint protegido (ej. /users/getprofile)
+- Y construir el estado de sesión desde esa respuesta.
