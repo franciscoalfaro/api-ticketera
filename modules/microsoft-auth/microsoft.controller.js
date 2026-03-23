@@ -51,11 +51,23 @@ export const handleMicrosoftCallback = async (req, res) => {
     const msProfile = await microsoftService.getMicrosoftProfile(tokenResponse.accessToken);
     const userEmail = idToken.preferred_username || msProfile.mail || msProfile.userPrincipalName;
 
+    console.log("[MS_LOGIN] Perfil recibido desde Microsoft:", {
+      email: userEmail,
+      displayName: msProfile.displayName || idToken.name || null,
+      jobTitle_profile: msProfile.jobTitle || null,
+      jobTitle_claim: idToken.jobTitle || idToken.job_title || null,
+      oid: idToken.oid || null,
+    });
+
     if (!userEmail) {
       throw new Error("No se pudo obtener email del usuario Microsoft");
     }
 
     const roleValueToAssign = resolveRoleValueByJobTitle(msProfile.jobTitle);
+    console.log("[MS_LOGIN] Mapeo de rol por jobTitle:", {
+      jobTitle: msProfile.jobTitle || null,
+      resolvedRoleValue: roleValueToAssign,
+    });
 
     // Buscar usuario existente
     let user = await UserService.findByEmail(userEmail);
@@ -66,12 +78,25 @@ export const handleMicrosoftCallback = async (req, res) => {
       (i) => i.value === roleValueToAssign && !i.isDeleted
     );
 
+    console.log("[MS_LOGIN] Rol objetivo encontrado en lista:", {
+      roleValueToAssign,
+      roleId: targetRole?._id?.toString() || null,
+      roleLabel: targetRole?.label || null,
+    });
+
     if (!targetRole) {
       throw new Error(`No se encontró el rol '${roleValueToAssign}' en la lista de roles.`);
     }
 
     // Crear o actualizar usuario
     if (user) {
+      console.log("[MS_LOGIN] Usuario existente antes de actualizar:", {
+        userId: user._id?.toString(),
+        email: user.email,
+        currentRoleId: user.role?.toString?.() || null,
+        currentType: user.type,
+      });
+
       const mustUpdateMicrosoftIdentity = !user.microsoftId || user.microsoftId !== idToken.oid;
       const mustUpdateType = user.type !== "microsoft";
       const mustUpdateRole = !user.role || user.role.toString() !== targetRole._id.toString();
@@ -81,6 +106,13 @@ export const handleMicrosoftCallback = async (req, res) => {
         user.type = "microsoft";
         user.role = targetRole._id;
         await user.save();
+
+        console.log("[MS_LOGIN] Usuario actualizado por login Microsoft:", {
+          userId: user._id?.toString(),
+          updatedRoleId: user.role?.toString?.() || null,
+          updatedType: user.type,
+          updatedMicrosoftId: !!user.microsoftId,
+        });
       }
     } else {
       user = await UserService.create({
@@ -90,12 +122,25 @@ export const handleMicrosoftCallback = async (req, res) => {
         role: targetRole._id,
         type: "microsoft",
       });
+
+      console.log("[MS_LOGIN] Usuario creado por login Microsoft:", {
+        userId: user._id?.toString(),
+        email: user.email,
+        roleId: user.role?.toString?.() || null,
+        roleValue: roleValueToAssign,
+      });
     }
 
     // ENRIQUECER EL ROL (siempre DESPUÉS de tener user.role)
     let roleEnriched = rolesList.items.find(
       (item) => item._id.toString() === user.role.toString()
     );
+
+    console.log("[MS_LOGIN] Rol final enriquecido:", {
+      userId: user._id?.toString(),
+      roleId: user.role?.toString?.() || null,
+      roleValue: roleEnriched?.value || null,
+    });
 
     // Generar tokens
     const accessToken = createToken(user);
