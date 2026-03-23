@@ -77,7 +77,7 @@ export const getUser = async (req, res) => {
       user: req.user?.id,
       action: "OBTENER_USUARIO",
       module: "users",
-      description: `Consulta de usuario ${req.params.id}`,
+      description: `Consulta de usuario ${req.params.id} getuser(1 por id)`,
       status: "success",
       method: "GET",
       ip: req.clientIp,
@@ -102,9 +102,8 @@ export const getUser = async (req, res) => {
 // Obtener un usuario por token
 export const getUserProfile = async (req, res) => {
   const idProfile = req.user.id
-  console.log("Solicitud de perfil de usuario recibida.", req.user);
-  console.log("ID del perfil solicitado:", idProfile);
-
+  const userName = req.user.name
+  console.log("ID del perfil solicitado:", req.user);
   try {
     const user = await getUserById(idProfile);
     if (!user) {
@@ -123,7 +122,7 @@ export const getUserProfile = async (req, res) => {
       user: req.user?.id,
       action: "OBTENER_PERFIL_USUARIO",
       module: "users",
-      description: `Perfil consultado ${idProfile}`,
+      description: `Perfil de ${userName} consultado`,
       status: "success",
       method: "GET",
       ip: req.clientIp,
