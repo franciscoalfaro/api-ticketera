@@ -28,23 +28,3 @@ export const getTokenByAuthCode = async (authCode, redirectUri) => {
 
   return await cca.acquireTokenByCode(tokenRequest);
 };
-
-export const getMicrosoftProfile = async (accessToken) => {
-  const response = await fetch(
-    "https://graph.microsoft.com/v1.0/me?$select=displayName,mail,userPrincipalName,jobTitle",
-    {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    }
-  );
-
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`No se pudo obtener perfil de Microsoft: ${response.status} ${errorBody}`);
-  }
-
-  return await response.json();
-};

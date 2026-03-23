@@ -4,14 +4,6 @@ import List from "../list/list.model.js";
 import { createToken, createRefreshToken } from "../../core/services/jwt.js";
 import { createLog } from "../logs/logs.service.js";
 
-const ADMIN_KEYWORDS = ["admin", "administrador", "supervisor", "jefe"];
-
-const resolveRoleValueByJobTitle = (jobTitle = "") => {
-  const normalized = String(jobTitle).toLowerCase().trim();
-  const isAdmin = ADMIN_KEYWORDS.some((keyword) => normalized.includes(keyword));
-  return isAdmin ? "admin" : "agente";
-};
-
 export const redirectToMicrosoftLogin = async (req, res, next) => {
   try {
     const redirectUri = process.env.MICROSOFT_REDIRECT_URI;
@@ -48,46 +40,31 @@ export const handleMicrosoftCallback = async (req, res) => {
     // Obtener tokens
     const tokenResponse = await microsoftService.getTokenByAuthCode(code, redirectUri);
     const idToken = tokenResponse.idTokenClaims;
-    const msProfile = await microsoftService.getMicrosoftProfile(tokenResponse.accessToken);
-    const userEmail = idToken.preferred_username || msProfile.mail || msProfile.userPrincipalName;
-
-    if (!userEmail) {
-      throw new Error("No se pudo obtener email del usuario Microsoft");
-    }
-
-    const roleValueToAssign = resolveRoleValueByJobTitle(msProfile.jobTitle);
 
     // Buscar usuario existente
-    let user = await UserService.findByEmail(userEmail);
+    let user = await UserService.findByEmail(idToken.preferred_username);
 
     // Buscar lista de roles
-    const rolesList = await List.findOne({ name: "Roles de Usuario", isDeleted: false }).lean();
-    const targetRole = rolesList?.items?.find(
-      (i) => i.value === roleValueToAssign && !i.isDeleted
-    );
+    const rolesList = await List.findOne({ name: "Roles de Usuario" });
+    const defaultRole = rolesList?.items.find(i => i.value === "agente");
 
-    if (!targetRole) {
-      throw new Error(`No se encontró el rol '${roleValueToAssign}' en la lista de roles.`);
+    if (!defaultRole) {
+      throw new Error("No se encontró el rol 'agente' en la lista de roles.");
     }
 
     // Crear o actualizar usuario
     if (user) {
-      const mustUpdateMicrosoftIdentity = !user.microsoftId || user.microsoftId !== idToken.oid;
-      const mustUpdateType = user.type !== "microsoft";
-      const mustUpdateRole = !user.role || user.role.toString() !== targetRole._id.toString();
-
-      if (mustUpdateMicrosoftIdentity || mustUpdateType || mustUpdateRole) {
+      if (!user.microsoftId) {
         user.microsoftId = idToken.oid;
         user.type = "microsoft";
-        user.role = targetRole._id;
         await user.save();
       }
     } else {
       user = await UserService.create({
-        name: idToken.name || msProfile.displayName || userEmail,
-        email: userEmail,
+        name: idToken.name,
+        email: idToken.preferred_username,
         microsoftId: idToken.oid,
-        role: targetRole._id,
+        role: defaultRole._id, 
         type: "microsoft",
       });
     }
