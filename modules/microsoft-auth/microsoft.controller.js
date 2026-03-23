@@ -108,7 +108,7 @@ export const handleMicrosoftCallback = async (req, res) => {
       ip: req.clientIp,
     });
 
-    res.redirect("https://ticketplatform.pages.dev/dashboard");
+    res.redirect("https://app.franciscoalfaro.cl/dashboard");
   } catch (error) {
     console.error("❌ Error en handleMicrosoftCallback:", error);
     await createLog({
@@ -120,7 +120,7 @@ export const handleMicrosoftCallback = async (req, res) => {
       method: "GET",
       ip: req.clientIp,
     });
-    return res.redirect("https://ticketplatform.pages.dev/login?error=auth_failed");
+    return res.redirect("https://app.franciscoalfaro.cl/login?error=auth_failed");
   }
 };
 

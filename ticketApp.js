@@ -55,11 +55,10 @@ app.use(cookieParser());
 // ==============================
 const allowedOrigins = [
   'https://api.franciscoalfaro.cl',
-  'https://ticketplatform.pages.dev',   // ✔️ corregido
+  'https://app.franciscoalfaro.cl',   // ✔️ corregido
   'http://localhost:5173',
   'http://localhost:3000',
-  'https://ais-dev-vxxmwmc6sojgfzndo6emnf-26788392421.us-west2.run.apphttps://ais-dev-vxxmwmc6sojgfzndo6emnf-26788392421.us-west2.run.app'
-];
+ ];
 
 const corsOptions = {
   origin: (origin, callback) => {
