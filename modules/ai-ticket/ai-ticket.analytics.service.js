@@ -42,6 +42,82 @@ const RESPONDER_MODELS = parseModelList(
   [OLLAMA_MODEL]
 );
 
+const INTENT_MAP = [
+  {
+    queryType: 'top_reporters',
+    patterns: [
+      /(usuarios?|reportantes?).*(reportaron|reportan|generaron|crearon).*(mas|más).*(tickets?)/,
+      /(quien|quién).*(genero|generó|creo|creó|reporto|reportó).*(mas|más).*(tickets?)/,
+      /top\s+(usuarios?|reportantes?)/,
+      /(usuarios?|reportantes?).*(mas|más).*(tickets?)/,
+    ],
+  },
+  {
+    queryType: 'repeated_causes',
+    patterns: [
+      /causas?\s+repetidas?/,
+      /incidencias\s+repetidas?/,
+      /problemas\s+repetidos?/,
+      /motivos\s+repetidos?/,
+    ],
+  },
+  {
+    queryType: 'daily_peaks',
+    patterns: [
+      /(que|qué).*(dias|días).*(mas|más).*(tickets?)/,
+      /(dias|días).*(pico|mayor\s+cantidad).*(tickets?)/,
+      /(dias|días).*(se\s+generaron|se\s+crearon).*(tickets?)/,
+    ],
+  },
+  {
+    queryType: 'trend_summary',
+    patterns: [
+      /tendencia/,
+      /evoluci[oó]n/,
+      /trend/,
+      /variaci[oó]n/,
+    ],
+  },
+  {
+    queryType: 'last_ticket_detail',
+    patterns: [
+      /(ultimo|último)\s+ticket.*(de\s+que|de\s+qué|detalle|trata|trató|asunto)/,
+      /(quien|quién)\s+lo\s+(reporto|reportó|envio|envió|creo|creó|genero|generó)/,
+      /y\s+(quien|quién)\s+lo\s+reporto/,
+    ],
+  },
+  {
+    queryType: 'priority_stats',
+    patterns: [
+      /prioridad/,
+      /prioridades/,
+    ],
+  },
+  {
+    queryType: 'status_distribution',
+    patterns: [
+      /estado/,
+      /distribuci[oó]n\s+por\s+estado/,
+      /estados/,
+    ],
+  },
+  {
+    queryType: 'most_repeated',
+    patterns: [
+      /categor/i,
+      /(mas|más)\s+reportad/i,
+      /mas\s+comun/i,
+    ],
+  },
+  {
+    queryType: 'last_tickets',
+    patterns: [
+      /(ultimos|últimos|recientes).*(tickets?)/,
+      /(lista|listado).*(tickets?)/,
+    ],
+  },
+];
+
 async function generateWithModelFallback(models, buildPayload) {
   const errors = [];
 
@@ -90,7 +166,7 @@ IMPORTANTE:
 
 Retorna SOLO un JSON válido:
 {
-  "queryType": "last_tickets|last_ticket_detail|trend_summary|repeated_causes|daily_peaks|most_repeated|category_stats|priority_stats|status_distribution",
+  "queryType": "last_tickets|last_ticket_detail|trend_summary|repeated_causes|daily_peaks|top_reporters|most_repeated|category_stats|priority_stats|status_distribution",
   "timeRange": "all|today|this_week|this_month|last_7_days|last_30_days|last_n_days",
   "limit": 5,
   "daysBack": null,
@@ -100,6 +176,7 @@ Retorna SOLO un JSON válido:
 Ejemplos:
 - "que dias se generaron mas ticket" => {"queryType":"daily_peaks","timeRange":"this_week","limit":5,"daysBack":null,"category":null}
 - "analiza causas repetidas de los ultimos 3 dias" => {"queryType":"repeated_causes","timeRange":"last_n_days","limit":5,"daysBack":3,"category":null}
+- "que usuarios reportaron mas tickets este mes" => {"queryType":"top_reporters","timeRange":"this_month","limit":5,"daysBack":null,"category":null}
 - "cual es la tendencia esta semana" => {"queryType":"trend_summary","timeRange":"this_week","limit":5,"daysBack":null,"category":null}
 - "cuales fueron los ultimos 10 tickets" => {"queryType":"last_tickets","timeRange":"all","limit":10,"daysBack":null,"category":null}
 - "cual es el ultimo ticket que se genero y quien lo envio" => {"queryType":"last_ticket_detail","timeRange":"all","limit":1,"daysBack":null,"category":null}
@@ -147,8 +224,97 @@ Responde SOLO con el JSON.`;
   }
 }
 
+function detectIntentFromMap(text) {
+  for (const intent of INTENT_MAP) {
+    const matched = intent.patterns.some((pattern) => pattern.test(text));
+    if (matched) return intent.queryType;
+  }
+  return null;
+}
+
+function getQuestionSignals(question) {
+  const q = String(question || '').toLowerCase();
+  const mappedIntent = detectIntentFromMap(q);
+
+  const mentionsTrend =
+    q.includes('tendencia') ||
+    q.includes('trend') ||
+    q.includes('evoluci');
+
+  const mentionsDailyPeaks =
+    (q.includes('dias') || q.includes('días') || q.includes('dia') || q.includes('día')) &&
+    (
+      q.includes('mas ticket') ||
+      q.includes('más ticket') ||
+      q.includes('se generaron') ||
+      q.includes('se crearon') ||
+      q.includes('pico')
+    );
+
+  const mentionsRepeatedCauses =
+    q.includes('causa repet') ||
+    q.includes('causas repet') ||
+    q.includes('incidencias repetidas') ||
+    q.includes('problemas repetidos') ||
+    q.includes('motivos repetidos');
+
+  const mentionsReporter =
+    q.includes('quien lo reporto') ||
+    q.includes('quién lo reportó') ||
+    q.includes('quien lo envio') ||
+    q.includes('quién lo envió') ||
+    q.includes('quien lo envi') ||
+    q.includes('quien lo creo') ||
+    q.includes('quién lo creó') ||
+    q.includes('quien reporto') ||
+    q.includes('reportó') ||
+    q.includes('reporto') ||
+    q.includes('quien lo levant');
+
+  const mentionsTopReporters =
+    mappedIntent === 'top_reporters' ||
+    (
+      (q.includes('usuario') || q.includes('usuarios') || q.includes('reportantes')) &&
+      (q.includes('mas ticket') || q.includes('más ticket') || q.includes('top')) &&
+      (q.includes('report') || q.includes('gener') || q.includes('cre'))
+    );
+
+  const asksLastTicketDetail =
+    (q.includes('último ticket') || q.includes('ultimo ticket')) &&
+    (
+      q.includes('de qué se trat') ||
+      q.includes('de que se trat') ||
+      q.includes('qué se trat') ||
+      q.includes('que se trat') ||
+      q.includes('quien lo envio') ||
+      q.includes('quién lo envió') ||
+      q.includes('quien lo reporto') ||
+      q.includes('quién lo reportó')
+    );
+
+  const asksLastTickets =
+    q.includes('últimos') ||
+    q.includes('ultimos') ||
+    q.includes('recientes') ||
+    q.includes('lista') ||
+    q.includes('listado');
+
+  return {
+    q,
+    mappedIntent,
+    mentionsTrend,
+    mentionsDailyPeaks,
+    mentionsRepeatedCauses,
+    mentionsReporter,
+    mentionsTopReporters,
+    asksLastTicketDetail,
+    asksLastTickets,
+  };
+}
+
 function fallbackInterpretQuestion(question) {
-  const text = String(question || '').toLowerCase();
+  const signals = getQuestionSignals(question);
+  const text = signals.q;
   const limitMatch = text.match(/(\d{1,3})/);
   const limit = limitMatch ? Number(limitMatch[1]) : 5;
   const daysMatch = text.match(/(?:ultimos?|últimos?)\s+(\d{1,3})\s+d[ií]as?/i);
@@ -163,59 +329,63 @@ function fallbackInterpretQuestion(question) {
   else if (daysBack && daysBack > 0) timeRange = 'last_n_days';
   else if (text.includes('todos') || text.includes('all')) timeRange = 'all';
 
-  if (text.includes('tendencia') || text.includes('trend') || text.includes('patrón') || text.includes('patron')) {
-    return { queryType: 'trend_summary', timeRange, limit: 5, daysBack, category: null };
+  if (signals.mappedIntent === 'top_reporters' || signals.mentionsTopReporters) {
+    return { queryType: 'top_reporters', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
   }
 
-  if (
-    text.includes('causas repetidas') ||
-    text.includes('causa repetida') ||
-    text.includes('incidencias repetidas') ||
-    text.includes('problemas repetidos') ||
-    text.includes('motivos repetidos')
-  ) {
+  if (signals.mappedIntent === 'repeated_causes') {
     return { queryType: 'repeated_causes', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
   }
 
-  if (
-    (text.includes('que dias') || text.includes('qué días') || text.includes('qué dias') || text.includes('dias')) &&
-    (text.includes('mas ticket') || text.includes('más ticket') || text.includes('se generaron') || text.includes('se crearon') || text.includes('mas incidencias'))
-  ) {
+  if (signals.mappedIntent === 'daily_peaks') {
     return { queryType: 'daily_peaks', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
   }
 
-  if (
-    text.includes('quien lo reporto') ||
-    text.includes('quién lo reportó') ||
-    text.includes('quien lo envio') ||
-    text.includes('quién lo envió') ||
-    text.includes('quien lo envi') ||
-    text.includes('quien lo creó') ||
-    text.includes('quien lo creo') ||
-    text.includes('quien lo levant') ||
-    text.includes('reportó') ||
-    text.includes('reporto')
-  ) {
+  if (signals.mappedIntent === 'trend_summary') {
+    return { queryType: 'trend_summary', timeRange, limit: 5, daysBack, category: null };
+  }
+
+  if (signals.mappedIntent === 'last_ticket_detail') {
     return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null, category: null };
   }
 
-  if (
-    (text.includes('último ticket') || text.includes('ultimo ticket')) &&
-    (
-      text.includes('de qué se trat') ||
-      text.includes('de que se trat') ||
-      text.includes('qué se trat') ||
-      text.includes('que se trat') ||
-      text.includes('quien lo envio') ||
-      text.includes('quién lo envió') ||
-      text.includes('quien lo reporto') ||
-      text.includes('quién lo reportó')
-    )
-  ) {
+  if (signals.mappedIntent === 'priority_stats') {
+    return { queryType: 'priority_stats', timeRange, limit, daysBack, category: null };
+  }
+
+  if (signals.mappedIntent === 'status_distribution') {
+    return { queryType: 'status_distribution', timeRange, limit, daysBack, category: null };
+  }
+
+  if (signals.mappedIntent === 'most_repeated') {
+    return { queryType: 'most_repeated', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
+  }
+
+  if (signals.mappedIntent === 'last_tickets') {
+    return { queryType: 'last_tickets', timeRange, limit, daysBack, category: null };
+  }
+
+  if (signals.mentionsTrend || text.includes('patrón') || text.includes('patron')) {
+    return { queryType: 'trend_summary', timeRange, limit: 5, daysBack, category: null };
+  }
+
+  if (signals.mentionsRepeatedCauses || text.includes('causa repetida')) {
+    return { queryType: 'repeated_causes', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
+  }
+
+  if (signals.mentionsDailyPeaks || text.includes('mas incidencias')) {
+    return { queryType: 'daily_peaks', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
+  }
+
+  if (signals.mentionsReporter) {
     return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null, category: null };
   }
 
-  if (text.includes('últimos') || text.includes('ultimos') || text.includes('recientes')) {
+  if (signals.asksLastTicketDetail) {
+    return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null, category: null };
+  }
+
+  if (signals.asksLastTickets) {
     return { queryType: 'last_tickets', timeRange, limit, daysBack, category: null };
   }
 
@@ -241,21 +411,17 @@ function chooseBestQueryParams(llmParams, fallbackParams, question = '') {
   const llmType = llmParams.queryType;
   const fallbackType = fallbackParams.queryType;
 
-  const q = String(question || '').toLowerCase();
-  const mentionsTrend = q.includes('tendencia') || q.includes('trend') || q.includes('evoluci');
-  const mentionsDailyPeaks = (q.includes('dias') || q.includes('días')) && (q.includes('mas ticket') || q.includes('más ticket') || q.includes('se generaron') || q.includes('se crearon'));
-  const mentionsRepeatedCauses = q.includes('causa repet') || q.includes('incidencias repetidas') || q.includes('problemas repetidos');
-  const mentionsReporter =
-    q.includes('quien lo reporto') ||
-    q.includes('quién lo reportó') ||
-    q.includes('quien lo envio') ||
-    q.includes('quién lo envió') ||
-    q.includes('quien lo envi') ||
-    q.includes('quien reporto') ||
-    q.includes('reportó') ||
-    q.includes('reporto');
+  const signals = getQuestionSignals(question);
 
   if (llmType === 'last_tickets' && fallbackType !== 'last_tickets') {
+    return fallbackParams;
+  }
+
+  if (llmType === 'last_tickets' && fallbackType === 'top_reporters') {
+    return fallbackParams;
+  }
+
+  if (llmType === 'last_ticket_detail' && fallbackType === 'top_reporters') {
     return fallbackParams;
   }
 
@@ -263,7 +429,7 @@ function chooseBestQueryParams(llmParams, fallbackParams, question = '') {
     return fallbackParams;
   }
 
-  if (mentionsReporter && llmType !== 'last_ticket_detail') {
+  if (signals.mentionsReporter && llmType !== 'last_ticket_detail') {
     return {
       ...fallbackParams,
       queryType: 'last_ticket_detail',
@@ -273,15 +439,15 @@ function chooseBestQueryParams(llmParams, fallbackParams, question = '') {
     };
   }
 
-  if (llmType === 'trend_summary' && !mentionsTrend) {
+  if (llmType === 'trend_summary' && !signals.mentionsTrend) {
     return fallbackParams;
   }
 
-  if (llmType === 'daily_peaks' && !mentionsDailyPeaks) {
+  if (llmType === 'daily_peaks' && !signals.mentionsDailyPeaks) {
     return fallbackParams;
   }
 
-  if (llmType === 'repeated_causes' && !mentionsRepeatedCauses && fallbackType !== 'repeated_causes') {
+  if (llmType === 'repeated_causes' && !signals.mentionsRepeatedCauses && fallbackType !== 'repeated_causes') {
     return fallbackParams;
   }
 
@@ -532,6 +698,15 @@ function buildAnalyticsDigest(analytics) {
         topDays: (analytics.data?.topDays || []).slice(0, 5),
       };
 
+    case 'top_reporters':
+      return {
+        type: analytics.type,
+        summary: analytics.summary,
+        rangeLabel: analytics.data?.rangeLabel,
+        totalTickets: analytics.data?.totalTickets || 0,
+        reporters: (analytics.data?.reporters || []).slice(0, 5),
+      };
+
     case 'most_repeated':
     case 'priority_stats':
     case 'status_distribution':
@@ -564,19 +739,9 @@ function buildAnalyticsDigest(analytics) {
 }
 
 function buildDeterministicAnswer(question, analytics) {
-  const q = String(question || '').toLowerCase();
-
-  const asksReporter =
-    q.includes('quien lo reporto') ||
-    q.includes('quién lo reportó') ||
-    q.includes('quien lo envio') ||
-    q.includes('quién lo envió') ||
-    q.includes('quien lo envi') ||
-    q.includes('quien lo creo') ||
-    q.includes('quién lo creó') ||
-    q.includes('quien reporto') ||
-    q.includes('reportó') ||
-    q.includes('reporto');
+  const signals = getQuestionSignals(question);
+  const q = signals.q;
+  const asksReporter = signals.mentionsReporter;
 
   if (analytics.type === 'last_ticket_detail') {
     if (asksReporter) {
@@ -611,6 +776,16 @@ function buildDeterministicAnswer(question, analytics) {
     return `${analytics.summary}${extra ? ` Luego destacan ${extra}.` : ''}`;
   }
 
+  if (analytics.type === 'top_reporters') {
+    const first = analytics.data?.reporters?.[0];
+    if (!first) return 'No encontré reportantes para analizar en el período consultado.';
+    const others = (analytics.data?.reporters || [])
+      .slice(1, 3)
+      .map((item) => `${item.name} (${item.count})`)
+      .join(', ');
+    return `${analytics.summary}${others ? ` Luego aparecen ${others}.` : ''}`;
+  }
+
   if (analytics.type === 'most_repeated') {
     const top = analytics.data?.[0];
     if (!top) return 'No hay suficientes datos para identificar la categoría más reportada.';
@@ -642,6 +817,129 @@ function buildDeterministicAnswer(question, analytics) {
   }
 
   return analytics.summary || 'Listo, procesé tu consulta con los datos disponibles.';
+}
+
+function normalizeForQualityCheck(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function applyQuestionGuards(question, queryParams, fallbackParams) {
+  const signals = getQuestionSignals(question);
+  const base = {
+    ...(fallbackParams || {}),
+    ...(queryParams || {}),
+  };
+
+  if (signals.mentionsTopReporters) {
+    return {
+      ...base,
+      queryType: 'top_reporters',
+      limit: Math.max(Number(base.limit) || 5, 5),
+    };
+  }
+
+  if (signals.mentionsReporter || signals.asksLastTicketDetail) {
+    return {
+      ...base,
+      queryType: 'last_ticket_detail',
+      timeRange: 'all',
+      limit: 1,
+      daysBack: null,
+    };
+  }
+
+  if (signals.mentionsRepeatedCauses && base.queryType !== 'repeated_causes') {
+    return {
+      ...base,
+      queryType: 'repeated_causes',
+      limit: Math.max(Number(base.limit) || 5, 3),
+    };
+  }
+
+  if (signals.mentionsDailyPeaks && base.queryType !== 'daily_peaks') {
+    return {
+      ...base,
+      queryType: 'daily_peaks',
+      limit: Math.max(Number(base.limit) || 5, 3),
+    };
+  }
+
+  if (signals.mentionsTrend && base.queryType !== 'trend_summary') {
+    return {
+      ...base,
+      queryType: 'trend_summary',
+    };
+  }
+
+  return base;
+}
+
+function isLowQualityAnswer(text, question, analytics, deterministicAnswer) {
+  const normalized = normalizeForQualityCheck(text);
+  if (!normalized) return true;
+  if (normalized.length < 30) return true;
+
+  if ((normalized.startsWith('{') && normalized.endsWith('}')) || (normalized.startsWith('[') && normalized.endsWith(']'))) {
+    return true;
+  }
+
+  const genericPatterns = [
+    'como asistente',
+    'no tengo acceso',
+    'no dispongo de acceso',
+    'no puedo acceder',
+    'necesito más contexto',
+    'necesito mas contexto',
+    'no cuento con suficientes datos',
+    'basado en los datos proporcionados',
+  ];
+
+  if (genericPatterns.some((pattern) => normalized.includes(pattern))) {
+    return true;
+  }
+
+  const signals = getQuestionSignals(question);
+  const mentionsTicket = /ticket|tickets/.test(normalized);
+
+  if (analytics?.type === 'repeated_causes' && !/(caus|repet|incidenc|problema|motiv)/.test(normalized)) {
+    return true;
+  }
+
+  if (analytics?.type === 'daily_peaks' && !/(d[ií]a|pico|jornada|se registraron|tickets)/.test(normalized)) {
+    return true;
+  }
+
+  if (analytics?.type === 'trend_summary' && !/(tendenc|aument|dismin|estable|variaci)/.test(normalized)) {
+    return true;
+  }
+
+  if (analytics?.type === 'top_reporters' && !/(usuario|usuarios|reportante|reportaron|tickets|top)/.test(normalized)) {
+    return true;
+  }
+
+  if (analytics?.type === 'last_ticket_detail') {
+    if (!mentionsTicket && !/(asunto|descrip|report|envi|cread|solicit)/.test(normalized)) {
+      return true;
+    }
+
+    if (signals.mentionsReporter && !/(report|envi|cread|usuario|solicit)/.test(normalized)) {
+      return true;
+    }
+  }
+
+  const deterministicNormalized = normalizeForQualityCheck(deterministicAnswer);
+  if (
+    deterministicNormalized &&
+    deterministicNormalized.length > 120 &&
+    normalized.length < Math.floor(deterministicNormalized.length * 0.45)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 async function getLastTickets(limit, timeRange, daysBack = null) {
@@ -687,6 +985,64 @@ async function getLastTicketDetail() {
     reporter,
     reporterText,
     narrative: `${buildTicketNarrative(ticket)} Reportado por: ${reporterText}.`,
+  };
+}
+
+async function getTopReporters(limit, timeRange, daysBack = null) {
+  const { startDate, endDate } = getDateRange(timeRange, daysBack);
+  const rangeLabel = getRangeLabelWithDays(timeRange, daysBack);
+
+  const reporters = await TicketModel.aggregate([
+    {
+      $match: {
+        createdAt: { $gte: startDate, $lte: endDate },
+      },
+    },
+    {
+      $group: {
+        _id: '$requester',
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { count: -1, _id: 1 } },
+    { $limit: Math.max(limit, 5) },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    {
+      $unwind: {
+        path: '$user',
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        requesterId: '$_id',
+        count: 1,
+        name: { $ifNull: ['$user.name', 'Usuario no identificado'] },
+        email: { $ifNull: ['$user.email', null] },
+      },
+    },
+  ]);
+
+  const totalTickets = reporters.reduce((acc, row) => acc + (Number(row.count) || 0), 0);
+
+  const first = reporters[0];
+  const summary = first
+    ? `En ${rangeLabel}, el usuario que más reportó fue ${first.name}${first.email ? ` (${first.email})` : ''} con ${first.count} tickets.`
+    : `No encontré usuarios reportantes en ${rangeLabel}.`;
+
+  return {
+    rangeLabel,
+    totalTickets,
+    reporters,
+    summary,
   };
 }
 
@@ -1026,6 +1382,16 @@ async function generateAnalyticsResponse(queryParams) {
         summary: data.summary,
       };
 
+    case 'top_reporters':
+      data = await getTopReporters(limit, timeRange, daysBack);
+      return {
+        type: 'top_reporters',
+        timeRange,
+        daysBack,
+        data,
+        summary: data.summary,
+      };
+
     case 'category_stats':
       data = await getCategoryStats(category || 'ticket', timeRange, limit, daysBack);
       return {
@@ -1074,7 +1440,8 @@ export async function askAnalytics(question) {
   try {
     const llmQueryParams = await interpretQuestion(question);
     const fallbackParams = fallbackInterpretQuestion(question);
-    const queryParams = chooseBestQueryParams(llmQueryParams, fallbackParams, question);
+    const selectedParams = chooseBestQueryParams(llmQueryParams, fallbackParams, question);
+    const queryParams = applyQuestionGuards(question, selectedParams, fallbackParams);
 
     if (!queryParams) {
       return {
@@ -1119,9 +1486,13 @@ export async function askAnalytics(question) {
 
       if (responseResult.ok) {
         const agentData = responseResult.data;
-        agentText = (agentData.response || '').trim() || agentText;
-        llmSummaryUsed = true;
-        responderModelUsed = responseResult.model;
+        const candidate = (agentData.response || '').trim();
+
+        if (!isLowQualityAnswer(candidate, question, analytics, agentText)) {
+          agentText = candidate;
+          llmSummaryUsed = true;
+          responderModelUsed = responseResult.model;
+        }
       }
     } catch (_) {
     }
@@ -1159,6 +1530,7 @@ export default {
   getTrendSummary,
   getRepeatedCauses,
   getDailyPeaks,
+  getTopReporters,
   getMostRepeatedCategories,
   getPriorityStats,
   getStatusDistribution,
