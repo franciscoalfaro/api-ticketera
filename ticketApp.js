@@ -26,6 +26,7 @@ import enterpriseRoutes from './modules/enterprise/enterprise.routes.js';
 import reportRoutes from "./modules/reports/reports.routes.js";
 import uploadRoutes from './modules/uploads/uploads.routes.js';
 import logsRoutes from './modules/logs/logs.routes.js';
+import aiTicketRoutes from './modules/ai-ticket/ai-ticket.routes.js';
 
 import { processUnreadEmails } from './modules/mail-processor/mail.listener.js';
 
@@ -115,6 +116,7 @@ app.use('/api/getemail', mailRoutes);
 app.use('/api/enterprise', enterpriseRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/logs", logsRoutes);
+app.use('/api/ai-ticket', aiTicketRoutes);
 
 // ==============================
 // 🔹 Seeds iniciales

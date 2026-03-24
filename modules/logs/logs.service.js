@@ -1,10 +1,13 @@
 import Log from "./logs.model.js";
+import mongoose from "mongoose";
 
 // Función para crear un nuevo log en la base de datos sin controlador
 export const createLog = async ({ user, action, module, description, method, status, ip }) => {
   try {
+    const normalizedUser = mongoose.Types.ObjectId.isValid(user) ? user : null;
+
     const log = new Log({
-      user: user || null,
+      user: normalizedUser,
       action,
       module,
       description,

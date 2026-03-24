@@ -3,6 +3,7 @@ import { sendTicketResponseEmail } from "../mail-processor/mail.utils.js";
 import * as TicketService from "./ticket.service.js";
 import User from "../users/user.model.js"; // Asegúrate de importar el modelo User
 import { createLog } from "../logs/logs.service.js";
+import { resolveTicketClassificationFromEmail } from "../ai-ticket/ai-ticket.service.js";
 
 // Crear ticket
 export const createTicket = async (req, res) => {
@@ -17,7 +18,8 @@ export const createTicket = async (req, res) => {
       source,
       status,
       priority,
-      impact
+      impact,
+      aiAssist
     } = req.body;
 
     // =====================================================
@@ -52,6 +54,30 @@ export const createTicket = async (req, res) => {
     }
 
     // =====================================================
+    // 🔹 2.1 IA opcional para autocompletar campos faltantes
+    // =====================================================
+    let resolvedDepartment = department;
+    let resolvedType = type;
+    let resolvedPriority = priority;
+    let resolvedImpact = impact;
+
+    const shouldUseAiAssist = ["1", "true", "yes", "on"].includes(String(aiAssist || "").toLowerCase());
+
+    if (shouldUseAiAssist && (!resolvedDepartment || !resolvedType || !resolvedPriority || !resolvedImpact)) {
+      const defaults = await TicketService.getDefaultLists();
+      const aiResolution = await resolveTicketClassificationFromEmail({
+        subject,
+        html: description || "",
+        defaults,
+      });
+
+      resolvedDepartment = resolvedDepartment || aiResolution.resolvedDepartment;
+      resolvedType = resolvedType || aiResolution.resolvedType;
+      resolvedPriority = resolvedPriority || aiResolution.resolvedPriority;
+      resolvedImpact = resolvedImpact || aiResolution.resolvedImpact;
+    }
+
+    // =====================================================
     // 🔹 3. Crear ticket con status correcto
     // =====================================================
     const ticket = await TicketService.createTicketService({
@@ -59,12 +85,12 @@ export const createTicket = async (req, res) => {
       description,
       requester,
       assignedTo,
-      department,
-      type,
+      department: resolvedDepartment,
+      type: resolvedType,
       source,
       status: statusId,
-      priority,
-      impact,
+      priority: resolvedPriority,
+      impact: resolvedImpact,
       attachments,
     });
 

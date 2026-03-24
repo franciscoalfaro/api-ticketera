@@ -18,6 +18,7 @@ import {
   processRegularAttachments,
 } from "./mail.utils.js";
 import { generateDailyReport } from "../reports/reports.service.js";
+import { resolveTicketClassificationFromEmail } from "../ai-ticket/ai-ticket.service.js";
 
 const ALLOWED_DOMAINS = ["@hotmail.cl", "@gmail.com", "@franciscoalfaro.cl"];
 
@@ -341,14 +342,34 @@ export const processIncomingMail = async (mail) => {
     const sourceList = await List.findOne({ name: "Medios de Reporte" }).lean();
     const emailSource = sourceList.items.find((i) => i.value === "email");
 
+    const {
+      resolvedPriority,
+      resolvedImpact,
+      resolvedDepartment,
+      resolvedType,
+      aiResult,
+    } = await resolveTicketClassificationFromEmail({
+      subject: cleanSubjectText,
+      html: processedHtml,
+      defaults,
+    });
+
+    if (aiResult.enabled) {
+      if (aiResult.applied) {
+        console.log(`🤖 Clasificación IA aplicada (confianza ${aiResult.classification?.confidence ?? 0})`);
+      } else {
+        console.log(`🤖 IA no aplicada: ${aiResult.reason || "sin razón"}`);
+      }
+    }
+
     const newTicket = await createTicketService({
       subject: cleanSubjectText,
       description: processedHtml,
       requester: requester._id,
-      department: defaults.department,
-      priority: defaults.priority,
-      impact: defaults.impact,
-      type: defaults.type,
+      department: resolvedDepartment,
+      priority: resolvedPriority,
+      impact: resolvedImpact,
+      type: resolvedType,
       status: defaults.status,
       source: emailSource._id,
       assignedTo: defaultAgent ? defaultAgent._id : null,
