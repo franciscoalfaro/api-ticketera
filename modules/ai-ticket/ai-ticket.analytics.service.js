@@ -23,6 +23,56 @@ const OLLAMA_BASE_URL = normalizeBaseUrl(process.env.AI_OLLAMA_BASE_URL || 'http
 const OLLAMA_MODEL = process.env.AI_OLLAMA_MODEL || 'qwen2.5:14b-instruct';
 const AI_TIMEOUT_MS = Math.max(parseInt(process.env.AI_TIMEOUT_MS || '12000', 10) || 12000, 12000);
 
+function parseModelList(rawValue, fallback = []) {
+  if (!rawValue) return fallback;
+  const list = String(rawValue)
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return list.length ? list : fallback;
+}
+
+const INTERPRETER_MODELS = parseModelList(
+  process.env.AI_OLLAMA_INTERPRETER_MODELS,
+  [OLLAMA_MODEL]
+);
+
+const RESPONDER_MODELS = parseModelList(
+  process.env.AI_OLLAMA_RESPONDER_MODELS,
+  [OLLAMA_MODEL]
+);
+
+async function generateWithModelFallback(models, buildPayload) {
+  const errors = [];
+
+  for (const model of models) {
+    try {
+      const response = await isomorphic(
+        OLLAMA_BASE_URL + '/api/generate',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildPayload(model)),
+          timeout: AI_TIMEOUT_MS,
+        }
+      );
+
+      if (!response.ok) {
+        const err = `[${model}] HTTP ${response.status}`;
+        errors.push(err);
+        continue;
+      }
+
+      const data = await response.json();
+      return { ok: true, model, data, errors };
+    } catch (error) {
+      errors.push(`[${model}] ${error.message}`);
+    }
+  }
+
+  return { ok: false, model: null, data: null, errors };
+}
+
 /**
  * Interpreta una pregunta y retorna parámetros de consulta
  */
@@ -59,31 +109,26 @@ PREGUNTA: "${question}"
 Responde SOLO con el JSON.`;
 
   try {
-    const response = await isomorphic(
-      OLLAMA_BASE_URL + '/api/generate',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: OLLAMA_MODEL,
-          prompt: systemPrompt,
-          stream: false,
-          temperature: 0.1,
-          format: 'json',
-          options: {
-            num_predict: 120,
-          },
-        }),
-        timeout: AI_TIMEOUT_MS,
-      }
+    const result = await generateWithModelFallback(
+      INTERPRETER_MODELS,
+      (model) => ({
+        model,
+        prompt: systemPrompt,
+        stream: false,
+        temperature: 0.1,
+        format: 'json',
+        options: {
+          num_predict: 120,
+        },
+      })
     );
 
-    if (!response.ok) {
-      console.error('[IA] Ollama error: ' + response.status);
+    if (!result.ok) {
+      console.error('[IA] Error interpretando pregunta (todos los modelos fallaron):', result.errors.join(' | '));
       return null;
     }
 
-    const data = await response.json();
+    const data = result.data;
     const jsonMatch = data.response.match(/\{[\s\S]*\}/);
     
     if (!jsonMatch) {
@@ -92,7 +137,10 @@ Responde SOLO con el JSON.`;
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
-    return parsed;
+    return {
+      ...parsed,
+      __interpreterModel: result.model,
+    };
   } catch (error) {
     console.error('[IA] Error interpretando pregunta:', error.message);
     return null;
@@ -1052,32 +1100,34 @@ export async function askAnalytics(question) {
 
     let agentText = buildDeterministicAnswer(question, analytics);
     let llmSummaryUsed = false;
+    let interpreterModelUsed = llmQueryParams?.__interpreterModel || null;
+    let responderModelUsed = null;
 
     try {
-      const agentResponse = await isomorphic(
-        OLLAMA_BASE_URL + '/api/generate',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: OLLAMA_MODEL,
-            prompt: agentPrompt,
-            stream: false,
-            temperature: 0.3,
-            options: {
-              num_predict: 180,
-            },
-          }),
-          timeout: AI_TIMEOUT_MS,
-        }
+      const responseResult = await generateWithModelFallback(
+        RESPONDER_MODELS,
+        (model) => ({
+          model,
+          prompt: agentPrompt,
+          stream: false,
+          temperature: 0.3,
+          options: {
+            num_predict: 180,
+          },
+        })
       );
 
-      if (agentResponse.ok) {
-        const agentData = await agentResponse.json();
+      if (responseResult.ok) {
+        const agentData = responseResult.data;
         agentText = (agentData.response || '').trim() || agentText;
         llmSummaryUsed = true;
+        responderModelUsed = responseResult.model;
       }
     } catch (_) {
+    }
+
+    if (!interpreterModelUsed && llmQueryParams) {
+      interpreterModelUsed = INTERPRETER_MODELS[0] || null;
     }
 
     return {
@@ -1087,6 +1137,8 @@ export async function askAnalytics(question) {
       analytics,
       meta: {
         llmSummaryUsed,
+        interpreterModelUsed,
+        responderModelUsed,
       },
     };
   } catch (error) {
