@@ -5,7 +5,7 @@ import { askAgent, askAgentStream } from "./ai-ticket.agent.controller.js";
 
 const router = express.Router();
 
-router.use(auth);
+//router.use(auth);
 router.get("/status", aiClassifierStatus);
 router.post("/classify-email", classifyEmailPreview);
 router.post("/classify-ticket-draft", classifyManualTicketDraft);

@@ -1,27 +1,27 @@
 import isomorphic from 'isomorphic-fetch';
+import mongoose from 'mongoose';
 import TicketModel from '../tickets/ticket.model.js';
 import List from '../list/list.model.js';
 
+/* =========================
+   CONFIG
+========================= */
+
 function normalizeBaseUrl(baseUrl) {
   if (!baseUrl) return 'http://127.0.0.1:11434';
-  const trimmed = String(baseUrl).trim();
-  const sanitized = trimmed
-    .replace(/^['"]+/, '')
-    .replace(/['"]+$/, '')
-    .replace(/;$/, '')
-    .trim();
-
+  const sanitized = String(baseUrl).trim().replace(/^['"]+|['"]+$/g, '');
   if (!sanitized) return 'http://127.0.0.1:11434';
-
-  if (sanitized.startsWith('http://') || sanitized.startsWith('https://')) {
-    return sanitized;
-  }
+  if (sanitized.startsWith('http')) return sanitized;
   return `http://${sanitized}`;
 }
 
-const OLLAMA_BASE_URL = normalizeBaseUrl(process.env.AI_OLLAMA_BASE_URL || 'http://127.0.0.1:11434');
-const OLLAMA_MODEL = process.env.AI_OLLAMA_MODEL || 'qwen2.5:14b-instruct';
-const AI_TIMEOUT_MS = Math.max(parseInt(process.env.AI_TIMEOUT_MS || '12000', 10) || 12000, 12000);
+function normalizeOptionalBaseUrl(baseUrl) {
+  if (!baseUrl) return null;
+  const sanitized = String(baseUrl).trim().replace(/^['"]+|['"]+$/g, '');
+  if (!sanitized) return null;
+  if (sanitized.startsWith('http')) return sanitized;
+  return `http://${sanitized}`;
+}
 
 function parseModelList(rawValue, fallback = []) {
   if (!rawValue) return fallback;
@@ -31,6 +31,19 @@ function parseModelList(rawValue, fallback = []) {
     .filter(Boolean);
   return list.length ? list : fallback;
 }
+
+const OLLAMA_BASE_URL = normalizeBaseUrl(process.env.AI_OLLAMA_BASE_URL);
+const OLLAMA_MODEL = process.env.AI_OLLAMA_MODEL || 'minimax-m2:cloud';
+const AI_MIN_CONFIDENCE = Number(process.env.AI_MIN_CONFIDENCE || 0.7);
+const AI_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AI_TIMEOUT_MS || '60000', 10) || 60000, 8000);
+const AI_DB_TIMEOUT_MS = Math.max(Number.parseInt(process.env.AI_DB_TIMEOUT_MS || '15000', 10) || 15000, 2000);
+
+const CLOUD_BASE_URL = normalizeOptionalBaseUrl(process.env.AI_CLOUD_BASE_URL);
+const CLOUD_API_KEY = String(process.env.AI_CLOUD_API_KEY || '').trim();
+const CLOUD_AUTH_HEADER = String(process.env.AI_CLOUD_AUTH_HEADER || 'Authorization').trim();
+const CLOUD_AUTH_SCHEME = String(process.env.AI_CLOUD_AUTH_SCHEME || 'Bearer').trim();
+const CLOUD_GENERATE_PATH = String(process.env.AI_CLOUD_GENERATE_PATH || '/api/generate').trim();
+const CLOUD_ONLY = String(process.env.AI_CLOUD_ONLY || 'false').trim().toLowerCase() === 'true';
 
 const INTERPRETER_MODELS = parseModelList(
   process.env.AI_OLLAMA_INTERPRETER_MODELS,
@@ -42,452 +55,221 @@ const RESPONDER_MODELS = parseModelList(
   [OLLAMA_MODEL]
 );
 
-const INTENT_MAP = [
-  {
-    queryType: 'top_reporters',
-    patterns: [
-      /(usuarios?|reportantes?).*(reportaron|reportan|generaron|crearon).*(mas|más).*(tickets?)/,
-      /(quien|quién).*(genero|generó|creo|creó|reporto|reportó).*(mas|más).*(tickets?)/,
-      /top\s+(usuarios?|reportantes?)/,
-      /(usuarios?|reportantes?).*(mas|más).*(tickets?)/,
-    ],
-  },
-  {
-    queryType: 'repeated_causes',
-    patterns: [
-      /causas?\s+repetidas?/,
-      /incidencias\s+repetidas?/,
-      /problemas\s+repetidos?/,
-      /motivos\s+repetidos?/,
-    ],
-  },
-  {
-    queryType: 'daily_peaks',
-    patterns: [
-      /(que|qué).*(dias|días).*(mas|más).*(tickets?)/,
-      /(dias|días).*(pico|mayor\s+cantidad).*(tickets?)/,
-      /(dias|días).*(se\s+generaron|se\s+crearon).*(tickets?)/,
-    ],
-  },
-  {
-    queryType: 'trend_summary',
-    patterns: [
-      /tendencia/,
-      /evoluci[oó]n/,
-      /trend/,
-      /variaci[oó]n/,
-    ],
-  },
-  {
-    queryType: 'last_ticket_detail',
-    patterns: [
-      /(ultimo|último)\s+ticket.*(de\s+que|de\s+qué|detalle|trata|trató|asunto)/,
-      /(quien|quién)\s+lo\s+(reporto|reportó|envio|envió|creo|creó|genero|generó)/,
-      /y\s+(quien|quién)\s+lo\s+reporto/,
-    ],
-  },
-  {
-    queryType: 'priority_stats',
-    patterns: [
-      /prioridad/,
-      /prioridades/,
-    ],
-  },
-  {
-    queryType: 'status_distribution',
-    patterns: [
-      /estado/,
-      /distribuci[oó]n\s+por\s+estado/,
-      /estados/,
-    ],
-  },
-  {
-    queryType: 'most_repeated',
-    patterns: [
-      /categor/i,
-      /(mas|más)\s+reportad/i,
-      /mas\s+comun/i,
-    ],
-  },
-  {
-    queryType: 'last_tickets',
-    patterns: [
-      /(ultimos|últimos|recientes).*(tickets?)/,
-      /(lista|listado).*(tickets?)/,
-    ],
-  },
-  {
-    queryType: 'top_closers',
-    patterns: [
-      /(agente|agentes|quien|quién).*(cerro|cerró|resolvio|resolvió|cierr).*(mas|más).*(tickets?)/,
-      /(agente|agentes).*(mas|más).*(cerr|resol).*(tickets?)/,
-      /top\s+(agentes?)\s+(cerr|resol)/,
-    ],
-  },
-];
+const DYNAMIC_PLANNER_MODELS = parseModelList(
+  process.env.AI_OLLAMA_PLANNER_MODELS,
+  INTERPRETER_MODELS
+);
 
-async function generateWithModelFallback(models, buildPayload) {
+const DYNAMIC_MAX_LIMIT = Math.max(Number.parseInt(process.env.AI_DYNAMIC_MAX_LIMIT || '50', 10) || 50, 5);
+const DYNAMIC_MAX_PIPELINE_STAGES = Math.max(Number.parseInt(process.env.AI_DYNAMIC_MAX_PIPELINE_STAGES || '20', 10) || 20, 5);
+
+const ALLOWED_COLLECTIONS = new Set(['tickets']);
+const ALLOWED_OPERATIONS = new Set(['find', 'aggregate']);
+const KNOWN_QUERY_TYPES = new Set([
+  'last_tickets',
+  'last_ticket_detail',
+  'top_reporters',
+  'top_closers',
+  'trend_summary',
+]);
+const DANGEROUS_OPERATORS = new Set([
+  '$where',
+  '$function',
+  '$accumulator',
+  '$merge',
+  '$out',
+]);
+const ALLOWED_TICKET_FIELDS = new Set([
+  '_id',
+  'code',
+  'subject',
+  'description',
+  'requester',
+  'assignedTo',
+  'status',
+  'priority',
+  'impact',
+  'department',
+  'type',
+  'source',
+  'closedBy',
+  'closedAt',
+  'isDeleted',
+  'deletedAt',
+  'createdAt',
+  'updatedAt',
+]);
+
+/* =========================
+   UTILS
+========================= */
+
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await isomorphic(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function withTimeout(promise, timeoutMs, label = 'operation') {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      const error = new Error(`${label}_TIMEOUT`);
+      error.code = `${label}_TIMEOUT`;
+      reject(error);
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
+function assertMongoConnected() {
+  if (mongoose.connection.readyState !== 1) {
+    const error = new Error('MONGODB_NOT_CONNECTED');
+    error.code = 'MONGODB_NOT_CONNECTED';
+    throw error;
+  }
+}
+
+function isCloudModel(modelName = '') {
+  return /(:|-)?cloud$/i.test(String(modelName || '').trim());
+}
+
+function resolveModelTarget(modelName) {
+  const cloudModel = isCloudModel(modelName);
+  if (!cloudModel) {
+    if (CLOUD_ONLY) {
+      return {
+        invalid: true,
+        reason: `AI_CLOUD_ONLY=true y el modelo "${modelName}" no es cloud.`,
+      };
+    }
+
+    return {
+      provider: 'local',
+      baseUrl: OLLAMA_BASE_URL,
+      path: '/api/generate',
+      headers: {},
+    };
+  }
+
+  if (!CLOUD_BASE_URL) {
+    return {
+      invalid: true,
+      reason: `Modelo cloud "${modelName}" sin AI_CLOUD_BASE_URL válido.`,
+    };
+  }
+
+  if (!CLOUD_API_KEY) {
+    return {
+      invalid: true,
+      reason: `Modelo cloud "${modelName}" sin AI_CLOUD_API_KEY.`,
+    };
+  }
+
+  const headers = {};
+  const isAuthorization = CLOUD_AUTH_HEADER.toLowerCase() === 'authorization';
+  headers[CLOUD_AUTH_HEADER] = isAuthorization
+    ? `${CLOUD_AUTH_SCHEME} ${CLOUD_API_KEY}`
+    : CLOUD_API_KEY;
+
+  return {
+    provider: 'cloud',
+    baseUrl: CLOUD_BASE_URL,
+    path: CLOUD_GENERATE_PATH || '/api/generate',
+    headers,
+  };
+}
+
+async function generateWithModelFallback(models, buildPayload, contextLabel = 'task') {
   const errors = [];
 
   for (const model of models) {
+    const target = resolveModelTarget(model);
+    if (target.invalid) {
+      const invalidError = `[${contextLabel}] [${model}] ${target.reason}`;
+      errors.push(invalidError);
+      console.warn('[AI Analytics] MODEL_SKIPPED', {
+        context: contextLabel,
+        model,
+        reason: target.reason,
+      });
+      continue;
+    }
+
+    const url = `${target.baseUrl}${target.path}`;
+    const payload = buildPayload(model);
+
     try {
-      const response = await isomorphic(
-        OLLAMA_BASE_URL + '/api/generate',
+      console.log('[AI Analytics] MODEL_ATTEMPT', {
+        context: contextLabel,
+        model,
+        provider: target.provider,
+        url,
+      });
+
+      const res = await fetchWithTimeout(
+        url,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildPayload(model)),
-          timeout: AI_TIMEOUT_MS,
-        }
+          headers: {
+            'Content-Type': 'application/json',
+            ...target.headers,
+          },
+          body: JSON.stringify(payload),
+        },
+        AI_TIMEOUT_MS
       );
 
-      if (!response.ok) {
-        const err = `[${model}] HTTP ${response.status}`;
-        errors.push(err);
+      if (!res.ok) {
+        const bodyText = await res.text();
+        const errorText = `[${contextLabel}] [${model}] HTTP ${res.status} ${bodyText?.slice(0, 220) || ''}`;
+        errors.push(errorText);
+        console.warn('[AI Analytics] MODEL_FAILED', { context: contextLabel, model, status: res.status });
         continue;
       }
 
-      const data = await response.json();
-      return { ok: true, model, data, errors };
-    } catch (error) {
-      errors.push(`[${model}] ${error.message}`);
-    }
-  }
-
-  return { ok: false, model: null, data: null, errors };
-}
-
-/**
- * Interpreta una pregunta y retorna parámetros de consulta
- */
-async function interpretQuestion(question) {
-  const systemPrompt = `Eres un asistente que interpreta preguntas sobre tickets en lenguaje natural.
-Tu tarea es extraer parámetros de consulta en un JSON estricto.
-
-IMPORTANTE:
-- No asumas "trend_summary" si el usuario no menciona explícitamente tendencia/evolución.
-- Si pregunta por "qué días hubo más tickets", usa "daily_peaks".
-- Si pregunta por "causas repetidas", usa "repeated_causes".
-- Si pregunta por "de qué se trató el último ticket", usa "last_ticket_detail".
-- Si pregunta quién lo reportó/envió (aunque sea follow-up corto como "y quién lo reportó"), usa "last_ticket_detail".
-- "last_tickets" solo cuando pidan explícitamente últimos/recientes/listado.
-
-Retorna SOLO un JSON válido:
-{
-  "queryType": "last_tickets|last_ticket_detail|trend_summary|repeated_causes|daily_peaks|top_reporters|most_repeated|category_stats|priority_stats|status_distribution",
-  "timeRange": "all|today|this_week|this_month|last_7_days|last_30_days|last_n_days",
-  "limit": 5,
-  "daysBack": null,
-  "category": null
-}
-
-Ejemplos:
-- "que dias se generaron mas ticket" => {"queryType":"daily_peaks","timeRange":"this_week","limit":5,"daysBack":null,"category":null}
-- "analiza causas repetidas de los ultimos 3 dias" => {"queryType":"repeated_causes","timeRange":"last_n_days","limit":5,"daysBack":3,"category":null}
-- "que usuarios reportaron mas tickets este mes" => {"queryType":"top_reporters","timeRange":"this_month","limit":5,"daysBack":null,"category":null}
-- "cual es la tendencia esta semana" => {"queryType":"trend_summary","timeRange":"this_week","limit":5,"daysBack":null,"category":null}
-- "cuales fueron los ultimos 10 tickets" => {"queryType":"last_tickets","timeRange":"all","limit":10,"daysBack":null,"category":null}
-- "cual es el ultimo ticket que se genero y quien lo envio" => {"queryType":"last_ticket_detail","timeRange":"all","limit":1,"daysBack":null,"category":null}
-- "y quien lo reporto" => {"queryType":"last_ticket_detail","timeRange":"all","limit":1,"daysBack":null,"category":null}
-
-PREGUNTA: "${question}"
-Responde SOLO con el JSON.`;
-
-  try {
-    const result = await generateWithModelFallback(
-      INTERPRETER_MODELS,
-      (model) => ({
+      const data = await res.json();
+      return {
+        ok: true,
+        data,
         model,
-        prompt: systemPrompt,
-        stream: false,
-        temperature: 0.1,
-        format: 'json',
-        options: {
-          num_predict: 120,
-        },
-      })
-    );
-
-    if (!result.ok) {
-      console.error('[IA] Error interpretando pregunta (todos los modelos fallaron):', result.errors.join(' | '));
-      return null;
+        provider: target.provider,
+        errors,
+      };
+    } catch (error) {
+      const errorText = `[${contextLabel}] [${model}] ${error.message}`;
+      errors.push(errorText);
+      console.warn('[AI Analytics] MODEL_ERROR', { context: contextLabel, model, error: error.message });
     }
-
-    const data = result.data;
-    const jsonMatch = data.response.match(/\{[\s\S]*\}/);
-    
-    if (!jsonMatch) {
-      console.error('[IA] No se pudo extraer JSON de la respuesta');
-      return null;
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    return {
-      ...parsed,
-      __interpreterModel: result.model,
-    };
-  } catch (error) {
-    console.error('[IA] Error interpretando pregunta:', error.message);
-    return null;
-  }
-}
-
-function detectIntentFromMap(text) {
-  for (const intent of INTENT_MAP) {
-    const matched = intent.patterns.some((pattern) => pattern.test(text));
-    if (matched) return intent.queryType;
-  }
-  return null;
-}
-
-function getQuestionSignals(question) {
-  const q = String(question || '').toLowerCase();
-  const mappedIntent = detectIntentFromMap(q);
-
-  const mentionsTrend =
-    q.includes('tendencia') ||
-    q.includes('trend') ||
-    q.includes('evoluci');
-
-  const mentionsDailyPeaks =
-    (q.includes('dias') || q.includes('días') || q.includes('dia') || q.includes('día')) &&
-    (
-      q.includes('mas ticket') ||
-      q.includes('más ticket') ||
-      q.includes('se generaron') ||
-      q.includes('se crearon') ||
-      q.includes('pico')
-    );
-
-  const mentionsRepeatedCauses =
-    q.includes('causa repet') ||
-    q.includes('causas repet') ||
-    q.includes('incidencias repetidas') ||
-    q.includes('problemas repetidos') ||
-    q.includes('motivos repetidos');
-
-  const mentionsReporter =
-    q.includes('quien lo reporto') ||
-    q.includes('quién lo reportó') ||
-    q.includes('quien lo envio') ||
-    q.includes('quién lo envió') ||
-    q.includes('quien lo envi') ||
-    q.includes('quien lo creo') ||
-    q.includes('quién lo creó') ||
-    q.includes('quien reporto') ||
-    q.includes('reportó') ||
-    q.includes('reporto') ||
-    q.includes('quien lo levant');
-
-  const mentionsTopReporters =
-    mappedIntent === 'top_reporters' ||
-    (
-      (q.includes('usuario') || q.includes('usuarios') || q.includes('reportantes')) &&
-      (q.includes('mas ticket') || q.includes('más ticket') || q.includes('top')) &&
-      (q.includes('report') || q.includes('gener') || q.includes('cre'))
-    );
-
-  const mentionsTopClosers =
-    mappedIntent === 'top_closers' ||
-    (
-      (q.includes('agente') || q.includes('agentes')) &&
-      (q.includes('cerro') || q.includes('cerró') || q.includes('resolvio') || q.includes('resolvió') || q.includes('cierr') || q.includes('resol')) &&
-      (q.includes('mas ticket') || q.includes('más ticket') || q.includes('mas ') || q.includes('más '))
-    );
-
-  const asksLastTicketDetail =
-    (q.includes('último ticket') || q.includes('ultimo ticket')) &&
-    (
-      q.includes('de qué se trat') ||
-      q.includes('de que se trat') ||
-      q.includes('qué se trat') ||
-      q.includes('que se trat') ||
-      q.includes('quien lo envio') ||
-      q.includes('quién lo envió') ||
-      q.includes('quien lo reporto') ||
-      q.includes('quién lo reportó')
-    );
-
-  const asksLastTickets =
-    q.includes('últimos') ||
-    q.includes('ultimos') ||
-    q.includes('recientes') ||
-    q.includes('lista') ||
-    q.includes('listado');
-
-  return {
-    q,
-    mappedIntent,
-    mentionsTrend,
-    mentionsDailyPeaks,
-    mentionsRepeatedCauses,
-    mentionsReporter,
-    mentionsTopReporters,
-    mentionsTopClosers,
-    asksLastTicketDetail,
-    asksLastTickets,
-  };
-}
-
-function fallbackInterpretQuestion(question) {
-  const signals = getQuestionSignals(question);
-  const text = signals.q;
-  const limitMatch = text.match(/(\d{1,3})/);
-  const limit = limitMatch ? Number(limitMatch[1]) : 5;
-  const daysMatch = text.match(/(?:ultimos?|últimos?)\s+(\d{1,3})\s+d[ií]as?/i);
-  const daysBack = daysMatch ? Number(daysMatch[1]) : null;
-
-  let timeRange = 'this_week';
-  if (text.includes('hoy')) timeRange = 'today';
-  else if (text.includes('esta semana')) timeRange = 'this_week';
-  else if (text.includes('este mes')) timeRange = 'this_month';
-  else if (text.includes('últimos 7') || text.includes('ultimos 7')) timeRange = 'last_7_days';
-  else if (text.includes('últimos 30') || text.includes('ultimos 30')) timeRange = 'last_30_days';
-  else if (daysBack && daysBack > 0) timeRange = 'last_n_days';
-  else if (text.includes('todos') || text.includes('all')) timeRange = 'all';
-
-  if (signals.mappedIntent === 'top_closers' || signals.mentionsTopClosers) {
-    return { queryType: 'top_closers', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'top_reporters' || signals.mentionsTopReporters) {
-    return { queryType: 'top_reporters', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'repeated_causes') {
-    return { queryType: 'repeated_causes', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'daily_peaks') {
-    return { queryType: 'daily_peaks', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'trend_summary') {
-    return { queryType: 'trend_summary', timeRange, limit: 5, daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'last_ticket_detail') {
-    return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null, category: null };
-  }
-
-  if (signals.mappedIntent === 'priority_stats') {
-    return { queryType: 'priority_stats', timeRange, limit, daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'status_distribution') {
-    return { queryType: 'status_distribution', timeRange, limit, daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'most_repeated') {
-    return { queryType: 'most_repeated', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
-  }
-
-  if (signals.mappedIntent === 'last_tickets') {
-    return { queryType: 'last_tickets', timeRange, limit, daysBack, category: null };
-  }
-
-  if (signals.mentionsTrend || text.includes('patrón') || text.includes('patron')) {
-    return { queryType: 'trend_summary', timeRange, limit: 5, daysBack, category: null };
-  }
-
-  if (signals.mentionsRepeatedCauses || text.includes('causa repetida')) {
-    return { queryType: 'repeated_causes', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
-  }
-
-  if (signals.mentionsDailyPeaks || text.includes('mas incidencias')) {
-    return { queryType: 'daily_peaks', timeRange, limit: Math.max(limit, 3), daysBack, category: null };
-  }
-
-  if (signals.mentionsReporter) {
-    return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null, category: null };
-  }
-
-  if (signals.asksLastTicketDetail) {
-    return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null, category: null };
-  }
-
-  if (signals.asksLastTickets) {
-    return { queryType: 'last_tickets', timeRange, limit, daysBack, category: null };
-  }
-
-  if (text.includes('categor') || text.includes('repetid') || text.includes('más reportad') || text.includes('mas reportad')) {
-    return { queryType: 'most_repeated', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
-  }
-
-  if (text.includes('prioridad')) {
-    return { queryType: 'priority_stats', timeRange, limit, daysBack, category: null };
-  }
-
-  if (text.includes('estado') || text.includes('distribución') || text.includes('distribucion')) {
-    return { queryType: 'status_distribution', timeRange, limit, daysBack, category: null };
-  }
-
-  return { queryType: 'last_tickets', timeRange: 'this_week', limit: 5, daysBack: null, category: null };
-}
-
-function chooseBestQueryParams(llmParams, fallbackParams, question = '') {
-  if (!llmParams) return fallbackParams;
-  if (!fallbackParams) return llmParams;
-
-  const llmType = llmParams.queryType;
-  const fallbackType = fallbackParams.queryType;
-
-  const signals = getQuestionSignals(question);
-
-  if (llmType === 'last_tickets' && fallbackType !== 'last_tickets') {
-    return fallbackParams;
-  }
-
-  if (llmType === 'last_tickets' && fallbackType === 'top_reporters') {
-    return fallbackParams;
-  }
-
-  if (llmType === 'last_ticket_detail' && fallbackType === 'top_reporters') {
-    return fallbackParams;
-  }
-
-  if (llmType === 'last_tickets' && fallbackType === 'top_closers') {
-    return fallbackParams;
-  }
-
-  if (llmType === 'last_ticket_detail' && fallbackType === 'top_closers') {
-    return fallbackParams;
-  }
-
-  if (llmType === 'most_repeated' && fallbackType === 'repeated_causes') {
-    return fallbackParams;
-  }
-
-  if (signals.mentionsReporter && llmType !== 'last_ticket_detail') {
-    return {
-      ...fallbackParams,
-      queryType: 'last_ticket_detail',
-      timeRange: 'all',
-      limit: 1,
-      daysBack: null,
-    };
-  }
-
-  if (llmType === 'trend_summary' && !signals.mentionsTrend) {
-    return fallbackParams;
-  }
-
-  if (llmType === 'daily_peaks' && !signals.mentionsDailyPeaks) {
-    return fallbackParams;
-  }
-
-  if (llmType === 'repeated_causes' && !signals.mentionsRepeatedCauses && fallbackType !== 'repeated_causes') {
-    return fallbackParams;
   }
 
   return {
-    ...fallbackParams,
-    ...llmParams,
-    daysBack: llmParams.daysBack ?? fallbackParams.daysBack ?? null,
+    ok: false,
+    data: null,
+    model: null,
+    provider: null,
+    errors,
   };
 }
 
-function getDateRange(timeRange, daysBack = null) {
+function includesAny(text, words = []) {
+  return words.some((word) => text.includes(word));
+}
+
+function getDateRange(timeRange = 'this_week', daysBack = null) {
   const now = new Date();
   let startDate = new Date(0);
 
@@ -495,12 +277,13 @@ function getDateRange(timeRange, daysBack = null) {
     case 'today':
       startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
       break;
-    case 'this_week':
+    case 'this_week': {
       const dayOfWeek = now.getDay();
       startDate = new Date(now);
       startDate.setDate(now.getDate() - dayOfWeek);
       startDate.setHours(0, 0, 0, 0);
       break;
+    }
     case 'this_month':
       startDate = new Date(now.getFullYear(), now.getMonth(), 1);
       break;
@@ -511,11 +294,11 @@ function getDateRange(timeRange, daysBack = null) {
       startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       break;
     case 'last_n_days': {
-      const n = Number(daysBack);
-      const resolved = Number.isFinite(n) && n > 0 ? n : 7;
+      const resolved = Number(daysBack) > 0 ? Number(daysBack) : 7;
       startDate = new Date(now.getTime() - resolved * 24 * 60 * 60 * 1000);
       break;
     }
+    case 'all':
     default:
       break;
   }
@@ -523,549 +306,414 @@ function getDateRange(timeRange, daysBack = null) {
   return { startDate, endDate: now };
 }
 
-function getRangeLabel(timeRange) {
-  switch (timeRange) {
-    case 'today': return 'hoy';
-    case 'this_week': return 'esta semana';
-    case 'this_month': return 'este mes';
-    case 'last_7_days': return 'los últimos 7 días';
-    case 'last_30_days': return 'los últimos 30 días';
-    case 'last_n_days': return 'los últimos días';
-    case 'all': return 'el período analizado';
-    default: return 'el período analizado';
-  }
-}
+/* =========================
+   INTENT SIGNALS
+========================= */
 
-function getRangeLabelWithDays(timeRange, daysBack) {
-  if (timeRange === 'last_n_days') {
-    const n = Number(daysBack);
-    if (Number.isFinite(n) && n > 0) return `los últimos ${n} días`;
-    return 'los últimos días';
-  }
-  return getRangeLabel(timeRange);
-}
+function getQuestionSignals(question) {
+  const q = String(question || '').toLowerCase();
 
-async function getListValueLookup() {
-  const lists = await List.find({
-    name: { $in: ['Departamentos', 'Tipos de Ticket', 'Prioridades'] },
-    isDeleted: false,
-  }).lean();
-
-  const lookup = {
-    department: new Map(),
-    type: new Map(),
-    priority: new Map(),
-  };
-
-  for (const list of lists) {
-    const target = list.name === 'Departamentos'
-      ? lookup.department
-      : list.name === 'Tipos de Ticket'
-        ? lookup.type
-        : list.name === 'Prioridades'
-          ? lookup.priority
-          : null;
-
-    if (!target) continue;
-
-    for (const item of list.items || []) {
-      if (!item?._id) continue;
-      target.set(String(item._id), item.value || item.label || String(item._id));
-    }
-  }
-
-  return lookup;
-}
-
-function mapTopEntry(entry, map, fallbackLabel) {
-  if (!entry) return { label: 'Sin datos', count: 0 };
-  const rawId = entry._id ? String(entry._id) : null;
-  const mapped = rawId ? map.get(rawId) : null;
   return {
-    label: mapped || rawId || fallbackLabel,
-    count: Number(entry.count || 0),
+    q,
+
+    mentionsTrend: includesAny(q, ['tendencia', 'trend', 'evoluci']),
+
+    mentionsRepeatedCauses: includesAny(q, ['repetid', 'causa', 'problema']),
+
+    mentionsDailyPeaks: includesAny(q, ['dia', 'día', 'pico']),
+
+    mentionsReporter:
+      q.includes('quien') && q.includes('report'),
+
+    // 🔥 FIX REAL
+    mentionsTopReporters:
+      (q.includes('usuario') || q.includes('usuarios')) &&
+      (q.includes('report') || q.includes('ticket')),
+
+    mentionsTopClosers:
+      (q.includes('agente') || q.includes('quien')) &&
+      (q.includes('cerro') || q.includes('cerró') || q.includes('resolv')),
+
+    asksLastTickets:
+      includesAny(q, ['recientes', 'lista']) ||
+      /(?:últimos|ultimos)\s+\d*\s*tickets?/i.test(q),
   };
 }
 
-function calculateVariation(currentCount, previousCount) {
-  if (previousCount === 0) {
-    return {
-      trend: currentCount > 0 ? 'alza' : 'estable',
-      percentage: currentCount > 0 ? 100 : 0,
-    };
+/* =========================
+   FALLBACK INTENT
+========================= */
+
+function fallbackInterpretQuestion(question) {
+  const q = String(question || '').toLowerCase();
+  const limitMatch = q.match(/\d+/);
+  const limit = limitMatch ? Number(limitMatch[0]) : 5;
+
+  let timeRange = 'this_week';
+  if (q.includes('hoy')) timeRange = 'today';
+  else if (q.includes('este mes')) timeRange = 'this_month';
+  else if (q.includes('últimos 7') || q.includes('ultimos 7')) timeRange = 'last_7_days';
+  else if (q.includes('últimos 30') || q.includes('ultimos 30')) timeRange = 'last_30_days';
+  else if (q.includes('todos')) timeRange = 'all';
+
+  const daysMatch = q.match(/(?:ultimos?|últimos?)\s+(\d{1,3})\s+d[ií]as?/i);
+  const daysBack = daysMatch ? Number(daysMatch[1]) : null;
+  if (daysBack) timeRange = 'last_n_days';
+
+  if (q.includes('últimos') || q.includes('ultimos') || q.includes('recientes')) {
+    return { queryType: 'last_tickets', timeRange: 'all', limit, daysBack: null };
   }
 
-  const diff = currentCount - previousCount;
-  const percentage = Math.round((Math.abs(diff) / previousCount) * 100);
-
-  if (diff > 0) return { trend: 'alza', percentage };
-  if (diff < 0) return { trend: 'baja', percentage };
-  return { trend: 'estable', percentage: 0 };
+  return { queryType: 'last_tickets', timeRange, limit, daysBack };
 }
 
-function stripHtml(rawText) {
-  return String(rawText || '')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+/* =========================
+   LLM INTERPRETER
+========================= */
 
-function truncateText(value, maxLength = 280) {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength).trim() + '...';
-}
+async function interpretQuestion(question) {
+  try {
+    const result = await generateWithModelFallback(
+      INTERPRETER_MODELS,
+      (model) => ({
+        model,
+        prompt: `Devuelve JSON estricto con: queryType,timeRange,limit,daysBack,category para: "${question}"`,
+        stream: false,
+        format: 'json',
+      }),
+      'interpret_question'
+    );
 
-function buildTicketNarrative(ticket) {
-  if (!ticket) return 'No hay detalles disponibles para este ticket.';
-
-  const cleanDescription = stripHtml(ticket.description || '');
-  const latestUpdate = Array.isArray(ticket.updates) && ticket.updates.length > 0
-    ? ticket.updates[ticket.updates.length - 1]
-    : null;
-  const cleanUpdate = stripHtml(latestUpdate?.message || '');
-
-  const mainText = cleanDescription || cleanUpdate || 'Sin descripción registrada.';
-  const shortened = truncateText(mainText, 340);
-
-  return `Ticket ${ticket.code || ''}: ${ticket.subject || 'Sin asunto'}. ${shortened}`.trim();
-}
-
-function buildReporterText(reporter) {
-  if (!reporter) return 'Reportante no identificado';
-  const name = reporter.name ? String(reporter.name).trim() : null;
-  const email = reporter.email ? String(reporter.email).trim() : null;
-
-  if (name && email) return `${name} (${email})`;
-  if (name) return name;
-  if (email) return email;
-  return 'Reportante no identificado';
-}
-
-function compactTicket(ticket) {
-  if (!ticket) return null;
-  return {
-    _id: ticket._id,
-    code: ticket.code,
-    subject: ticket.subject,
-    description: truncateText(stripHtml(ticket.description || ''), 180),
-    createdAt: ticket.createdAt,
-    updatedAt: ticket.updatedAt,
-    priority: ticket.priority || null,
-    department: ticket.department || null,
-    type: ticket.type || null,
-    status: ticket.status || null,
-  };
-}
-
-function buildAnalyticsDigest(analytics) {
-  if (!analytics) return { type: 'unknown' };
-
-  switch (analytics.type) {
-    case 'last_tickets':
-      return {
-        type: analytics.type,
-        timeRange: analytics.timeRange,
-        count: Array.isArray(analytics.data) ? analytics.data.length : 0,
-        tickets: (analytics.data || []).slice(0, 5).map((ticket) => ({
-          code: ticket.code,
-          subject: ticket.subject,
-          description: truncateText(stripHtml(ticket.description || ''), 120),
-          createdAt: ticket.createdAt,
-        })),
-      };
-
-    case 'last_ticket_detail':
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-        ticket: analytics.data
-          ? {
-            code: analytics.data.code,
-            subject: analytics.data.subject,
-            description: truncateText(stripHtml(analytics.data.description || ''), 180),
-            createdAt: analytics.data.createdAt,
-          }
-          : null,
-      };
-
-    case 'trend_summary':
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-        currentCount: analytics.data?.currentCount || 0,
-        previousCount: analytics.data?.previousCount || 0,
-        variation: analytics.data?.variation || { trend: 'estable', percentage: 0 },
-        top: analytics.data?.top || null,
-      };
-
-    case 'repeated_causes':
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-        rangeLabel: analytics.data?.rangeLabel,
-        totalTickets: analytics.data?.totalTickets || 0,
-        causes: (analytics.data?.causes || []).slice(0, 5),
-      };
-
-    case 'daily_peaks':
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-        rangeLabel: analytics.data?.rangeLabel,
-        totalTickets: analytics.data?.totalTickets || 0,
-        daysWithTickets: analytics.data?.daysWithTickets || 0,
-        avgPerDay: analytics.data?.avgPerDay || 0,
-        peak: analytics.data?.peak || null,
-        topDays: (analytics.data?.topDays || []).slice(0, 5),
-      };
-
-    case 'top_reporters':
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-        rangeLabel: analytics.data?.rangeLabel,
-        totalTickets: analytics.data?.totalTickets || 0,
-        reporters: (analytics.data?.reporters || []).slice(0, 5),
-      };
-
-    case 'top_closers':
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-        rangeLabel: analytics.data?.rangeLabel,
-        totalTickets: analytics.data?.totalTickets || 0,
-        closers: (analytics.data?.closers || []).slice(0, 5),
-      };
-
-    case 'most_repeated':
-    case 'priority_stats':
-    case 'status_distribution':
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-        top: (analytics.data || []).slice(0, 5),
-      };
-
-    case 'category_stats':
-      return {
-        type: analytics.type,
-        category: analytics.category,
-        summary: analytics.summary,
-        count: Array.isArray(analytics.data) ? analytics.data.length : 0,
-        samples: (analytics.data || []).slice(0, 3).map((ticket) => ({
-          code: ticket.code,
-          subject: ticket.subject,
-          description: truncateText(stripHtml(ticket.description || ''), 120),
-          createdAt: ticket.createdAt,
-        })),
-      };
-
-    default:
-      return {
-        type: analytics.type,
-        summary: analytics.summary,
-      };
-  }
-}
-
-function buildDeterministicAnswer(question, analytics) {
-  const signals = getQuestionSignals(question);
-  const q = signals.q;
-  const asksReporter = signals.mentionsReporter;
-
-  if (analytics.type === 'last_ticket_detail') {
-    if (asksReporter) {
-      const code = analytics.data?.code || 'sin código';
-      const reporter = analytics.data?.reporterText || 'reportante no identificado';
-      return `El último ticket (${code}) fue reportado por ${reporter}.`;
-    }
-    return analytics.summary || 'No encontré detalle del último ticket.';
-  }
-
-  if (analytics.type === 'trend_summary') {
-    return analytics.summary || 'No fue posible determinar una tendencia clara en el período consultado.';
-  }
-
-  if (analytics.type === 'repeated_causes') {
-    const first = analytics.data?.causes?.[0];
-    if (!first) return 'No encontré causas repetidas en el período consultado.';
-    const others = (analytics.data?.causes || [])
-      .slice(1, 3)
-      .map((cause) => `${cause.subject} (${cause.count})`)
-      .join(', ');
-    return `${analytics.summary}${others ? ` También se repiten: ${others}.` : ''}`;
-  }
-
-  if (analytics.type === 'daily_peaks') {
-    const peak = analytics.data?.peak;
-    if (!peak) return 'No encontré tickets para analizar días pico.';
-    const extra = (analytics.data?.topDays || [])
-      .slice(1, 3)
-      .map((day) => `${day.day} (${day.count})`)
-      .join(', ');
-    return `${analytics.summary}${extra ? ` Luego destacan ${extra}.` : ''}`;
-  }
-
-  if (analytics.type === 'top_reporters') {
-    const first = analytics.data?.reporters?.[0];
-    if (!first) return 'No encontré reportantes para analizar en el período consultado.';
-    const others = (analytics.data?.reporters || [])
-      .slice(1, 3)
-      .map((item) => `${item.name} (${item.count})`)
-      .join(', ');
-    return `${analytics.summary}${others ? ` Luego aparecen ${others}.` : ''}`;
-  }
-
-  if (analytics.type === 'top_closers') {
-    const first = analytics.data?.closers?.[0];
-    if (!first) return 'No encontré agentes que hayan cerrado tickets en el período consultado.';
-    const others = (analytics.data?.closers || [])
-      .slice(1, 3)
-      .map((item) => `${item.name} (${item.count})`)
-      .join(', ');
-    return `${analytics.summary}${others ? ` Luego aparecen ${others}.` : ''}`;
-  }
-
-  if (analytics.type === 'most_repeated') {
-    const top = analytics.data?.[0];
-    if (!top) return 'No hay suficientes datos para identificar la categoría más reportada.';
-    return `La categoría más reportada es ${top._id || 'N/D'} con ${top.count || 0} tickets en el período consultado.`;
-  }
-
-  if (analytics.type === 'priority_stats') {
-    const top = analytics.data?.[0];
-    if (!top) return 'No hay suficientes datos para identificar la prioridad dominante.';
-    return `La prioridad dominante es ${top._id || 'N/D'} con ${top.count || 0} tickets.`;
-  }
-
-  if (analytics.type === 'status_distribution') {
-    if (!analytics.data?.length) return 'No hay tickets para analizar la distribución por estado.';
-    const head = analytics.data.slice(0, 3).map((s) => `${s._id || 'N/D'} (${s.count || 0})`).join(', ');
-    return `La distribución principal por estado es: ${head}.`;
-  }
-
-  if (analytics.type === 'last_tickets') {
-    const count = analytics.data?.length || 0;
-    if (q.includes('de qué') || q.includes('de que') || q.includes('qué pasó') || q.includes('que paso')) {
-      const first = analytics.data?.[0];
-      if (!first) return 'No encontré tickets recientes para responder esa consulta.';
-      return `El ticket más reciente (${first.code || 'sin código'}) trata sobre: ${first.subject || 'sin asunto'}. ${truncateText(stripHtml(first.description || ''), 140)}`;
-    }
-    if (!count) return 'No encontré tickets en el período consultado.';
-    const first = analytics.data?.[0];
-    return `Se registraron ${count} tickets en el período consultado. El más reciente es ${first?.code || 'sin código'}: ${first?.subject || 'sin asunto'}.`;
-  }
-
-  return analytics.summary || 'Listo, procesé tu consulta con los datos disponibles.';
-}
-
-function normalizeForQualityCheck(value) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function applyQuestionGuards(question, queryParams, fallbackParams) {
-  const signals = getQuestionSignals(question);
-  const base = {
-    ...(fallbackParams || {}),
-    ...(queryParams || {}),
-  };
-
-  if (signals.mentionsTopReporters) {
-    return {
-      ...base,
-      queryType: 'top_reporters',
-      limit: Math.max(Number(base.limit) || 5, 5),
-    };
-  }
-
-  if (signals.mentionsTopClosers) {
-    return {
-      ...base,
-      queryType: 'top_closers',
-      limit: Math.max(Number(base.limit) || 5, 5),
-    };
-  }
-
-  if (signals.mentionsReporter || signals.asksLastTicketDetail) {
-    return {
-      ...base,
-      queryType: 'last_ticket_detail',
-      timeRange: 'all',
-      limit: 1,
-      daysBack: null,
-    };
-  }
-
-  if (signals.mentionsRepeatedCauses && base.queryType !== 'repeated_causes') {
-    return {
-      ...base,
-      queryType: 'repeated_causes',
-      limit: Math.max(Number(base.limit) || 5, 3),
-    };
-  }
-
-  if (signals.mentionsDailyPeaks && base.queryType !== 'daily_peaks') {
-    return {
-      ...base,
-      queryType: 'daily_peaks',
-      limit: Math.max(Number(base.limit) || 5, 3),
-    };
-  }
-
-  if (signals.mentionsTrend && base.queryType !== 'trend_summary') {
-    return {
-      ...base,
-      queryType: 'trend_summary',
-    };
-  }
-
-  return base;
-}
-
-function isLowQualityAnswer(text, question, analytics, deterministicAnswer) {
-  const normalized = normalizeForQualityCheck(text);
-  if (!normalized) return true;
-  if (normalized.length < 30) return true;
-
-  if ((normalized.startsWith('{') && normalized.endsWith('}')) || (normalized.startsWith('[') && normalized.endsWith(']'))) {
-    return true;
-  }
-
-  const genericPatterns = [
-    'como asistente',
-    'no tengo acceso',
-    'no dispongo de acceso',
-    'no puedo acceder',
-    'necesito más contexto',
-    'necesito mas contexto',
-    'no cuento con suficientes datos',
-    'basado en los datos proporcionados',
-  ];
-
-  if (genericPatterns.some((pattern) => normalized.includes(pattern))) {
-    return true;
-  }
-
-  const signals = getQuestionSignals(question);
-  const mentionsTicket = /ticket|tickets/.test(normalized);
-
-  if (analytics?.type === 'repeated_causes' && !/(caus|repet|incidenc|problema|motiv)/.test(normalized)) {
-    return true;
-  }
-
-  if (analytics?.type === 'daily_peaks' && !/(d[ií]a|pico|jornada|se registraron|tickets)/.test(normalized)) {
-    return true;
-  }
-
-  if (analytics?.type === 'trend_summary' && !/(tendenc|aument|dismin|estable|variaci)/.test(normalized)) {
-    return true;
-  }
-
-  if (analytics?.type === 'top_reporters' && !/(usuario|usuarios|reportante|reportaron|tickets|top)/.test(normalized)) {
-    return true;
-  }
-
-  if (analytics?.type === 'top_closers' && !/(agente|agentes|cerr|resol|tickets|top)/.test(normalized)) {
-    return true;
-  }
-
-  if (analytics?.type === 'last_ticket_detail') {
-    if (!mentionsTicket && !/(asunto|descrip|report|envi|cread|solicit)/.test(normalized)) {
-      return true;
+    if (!result.ok) {
+      console.warn('[AI Analytics] INTERPRETER_ALL_FAILED', { errors: result.errors });
+      return null;
     }
 
-    if (signals.mentionsReporter && !/(report|envi|cread|usuario|solicit)/.test(normalized)) {
-      return true;
+    const match = result.data?.response?.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+
+    const parsed = JSON.parse(match[0]);
+    return {
+      ...parsed,
+      __interpreterModel: result.model,
+      __interpreterProvider: result.provider,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/* =========================
+   DYNAMIC QUERY PLANNER
+========================= */
+
+function safeJsonParse(rawText) {
+  if (!rawText || typeof rawText !== 'string') return null;
+  try {
+    const strict = rawText.trim();
+    return JSON.parse(strict);
+  } catch {
+    const match = rawText.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
     }
   }
+}
 
-  const deterministicNormalized = normalizeForQualityCheck(deterministicAnswer);
-  if (
-    deterministicNormalized &&
-    deterministicNormalized.length > 120 &&
-    normalized.length < Math.floor(deterministicNormalized.length * 0.45)
-  ) {
-    return true;
+function hasDangerousOperators(value) {
+  if (Array.isArray(value)) return value.some((item) => hasDangerousOperators(item));
+  if (!value || typeof value !== 'object') return false;
+
+  for (const [key, child] of Object.entries(value)) {
+    if (DANGEROUS_OPERATORS.has(key)) return true;
+    if (hasDangerousOperators(child)) return true;
   }
 
   return false;
 }
 
-async function getLastTickets(limit, timeRange, daysBack = null) {
+function pathRoot(path = '') {
+  return String(path || '').replace(/^\$+/, '').split('.')[0];
+}
+
+function hasDisallowedFieldReferences(value, allowedFields) {
+  if (Array.isArray(value)) return value.some((item) => hasDisallowedFieldReferences(item, allowedFields));
+  if (!value || typeof value !== 'object') return false;
+
+  for (const [key, child] of Object.entries(value)) {
+    const rootKey = pathRoot(key);
+    if (!key.startsWith('$') && rootKey && !allowedFields.has(rootKey)) {
+      return true;
+    }
+
+    if (typeof child === 'string' && child.startsWith('$')) {
+      const fieldRef = pathRoot(child);
+      if (fieldRef && !fieldRef.startsWith('$') && !allowedFields.has(fieldRef)) {
+        return true;
+      }
+    }
+
+    if (hasDisallowedFieldReferences(child, allowedFields)) return true;
+  }
+
+  return false;
+}
+
+function sanitizeDynamicQuery(dynamicQuery) {
+  if (!dynamicQuery || typeof dynamicQuery !== 'object') {
+    throw new Error('DYNAMIC_QUERY_INVALID_PAYLOAD');
+  }
+
+  const operation = String(dynamicQuery.operation || '').trim().toLowerCase();
+  const collection = String(dynamicQuery.collection || 'tickets').trim().toLowerCase();
+
+  if (!ALLOWED_COLLECTIONS.has(collection)) {
+    throw new Error(`DYNAMIC_QUERY_COLLECTION_NOT_ALLOWED:${collection || 'empty'}`);
+  }
+
+  if (!ALLOWED_OPERATIONS.has(operation)) {
+    throw new Error(`DYNAMIC_QUERY_OPERATION_NOT_ALLOWED:${operation || 'empty'}`);
+  }
+
+  if (hasDangerousOperators(dynamicQuery)) {
+    throw new Error('DYNAMIC_QUERY_DANGEROUS_OPERATOR');
+  }
+
+  const limit = Math.min(Math.max(Number(dynamicQuery.limit) || 10, 1), DYNAMIC_MAX_LIMIT);
+  const normalized = {
+    type: 'mongo_query',
+    collection,
+    operation,
+    limit,
+    explanation: String(dynamicQuery.explanation || '').slice(0, 300),
+  };
+
+  if (operation === 'find') {
+    const filter = dynamicQuery.filter && typeof dynamicQuery.filter === 'object' ? dynamicQuery.filter : {};
+    const sort = dynamicQuery.sort && typeof dynamicQuery.sort === 'object' ? dynamicQuery.sort : { createdAt: -1 };
+    const projection = dynamicQuery.projection && typeof dynamicQuery.projection === 'object'
+      ? dynamicQuery.projection
+      : {
+        _id: 1,
+        code: 1,
+        subject: 1,
+        requester: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      };
+
+    if (hasDisallowedFieldReferences({ filter, sort, projection }, ALLOWED_TICKET_FIELDS)) {
+      throw new Error('DYNAMIC_QUERY_DISALLOWED_FIELD_REFERENCE');
+    }
+
+    normalized.filter = {
+      isDeleted: { $ne: true },
+      ...filter,
+    };
+    normalized.sort = sort;
+    normalized.projection = projection;
+    return normalized;
+  }
+
+  const pipeline = Array.isArray(dynamicQuery.pipeline) ? dynamicQuery.pipeline : [];
+
+  if (!pipeline.length) {
+    throw new Error('DYNAMIC_QUERY_EMPTY_PIPELINE');
+  }
+
+  if (pipeline.length > DYNAMIC_MAX_PIPELINE_STAGES) {
+    throw new Error('DYNAMIC_QUERY_PIPELINE_TOO_LARGE');
+  }
+
+  if (hasDisallowedFieldReferences(pipeline, ALLOWED_TICKET_FIELDS)) {
+    throw new Error('DYNAMIC_QUERY_DISALLOWED_FIELD_REFERENCE');
+  }
+
+  const firstStage = pipeline[0];
+  const startsWithMatch = firstStage && typeof firstStage === 'object' && !Array.isArray(firstStage) && '$match' in firstStage;
+
+  normalized.pipeline = startsWithMatch
+    ? [
+      {
+        $match: {
+          isDeleted: { $ne: true },
+          ...(firstStage.$match || {}),
+        },
+      },
+      ...pipeline.slice(1),
+      { $limit: limit },
+    ]
+    : [
+      { $match: { isDeleted: { $ne: true } } },
+      ...pipeline,
+      { $limit: limit },
+    ];
+
+  return normalized;
+}
+
+async function planDynamicQuery(question) {
+  const plannerPrompt = [
+    'Devuelve SOLO JSON válido (sin markdown) con forma:',
+    '{"type":"mongo_query","collection":"tickets","operation":"find|aggregate","filter":{},"projection":{},"sort":{},"limit":10,"pipeline":[],"explanation":"..."}',
+    'Reglas obligatorias:',
+    '- Solo colección tickets.',
+    '- Solo operation find o aggregate.',
+    '- No uses $where, $function, $accumulator, $merge, $out.',
+    '- Incluye limit <= 50.',
+    '- Si operation=aggregate, incluye pipeline no vacío.',
+    '- Si operation=find, incluye filter/sort/projection.',
+    `Pregunta: "${question}"`,
+  ].join('\n');
+
+  const result = await generateWithModelFallback(
+    DYNAMIC_PLANNER_MODELS,
+    (model) => ({
+      model,
+      prompt: plannerPrompt,
+      stream: false,
+      format: 'json',
+    }),
+    'plan_dynamic_query'
+  );
+
+  if (!result.ok) {
+    return { ok: false, reason: 'DYNAMIC_PLANNER_MODELS_FAILED', errors: result.errors };
+  }
+
+  const parsed = safeJsonParse(result.data?.response);
+  if (!parsed) {
+    return { ok: false, reason: 'DYNAMIC_PLANNER_INVALID_JSON', errors: result.errors };
+  }
+
+  try {
+    const query = sanitizeDynamicQuery(parsed);
+    return {
+      ok: true,
+      query,
+      model: result.model,
+      provider: result.provider,
+      errors: result.errors,
+    };
+  } catch (validationError) {
+    return {
+      ok: false,
+      reason: validationError.message,
+      errors: [...(result.errors || []), validationError.message],
+      model: result.model,
+      provider: result.provider,
+    };
+  }
+}
+
+function getModelByCollection(collection) {
+  if (collection === 'tickets') return TicketModel;
+  return null;
+}
+
+async function executeDynamicQuery(dynamicQuery) {
+  const model = getModelByCollection(dynamicQuery.collection);
+
+  if (!model) {
+    throw new Error(`DYNAMIC_QUERY_MODEL_NOT_AVAILABLE:${dynamicQuery.collection}`);
+  }
+
+  if (dynamicQuery.operation === 'find') {
+    return await model
+      .find(dynamicQuery.filter || {})
+      .maxTimeMS(AI_DB_TIMEOUT_MS)
+      .sort(dynamicQuery.sort || { createdAt: -1 })
+      .select(dynamicQuery.projection || {})
+      .limit(Math.max(Number(dynamicQuery.limit) || 10, 1))
+      .lean();
+  }
+
+  if (dynamicQuery.operation === 'aggregate') {
+    return await model
+      .aggregate(dynamicQuery.pipeline || [])
+      .option({ maxTimeMS: AI_DB_TIMEOUT_MS });
+  }
+
+  throw new Error(`DYNAMIC_QUERY_OPERATION_NOT_IMPLEMENTED:${dynamicQuery.operation}`);
+}
+
+/* =========================
+   FINAL INTENT RESOLVER
+========================= */
+
+function resolveFinalIntent({ llm, fallback, question }) {
+  const signals = getQuestionSignals(question);
+
+  if (signals.mentionsReporter) {
+    return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null };
+  }
+
+  if (signals.mentionsTopClosers) {
+    return { ...fallback, queryType: 'top_closers', limit: Math.max(Number(fallback.limit) || 5, 5) };
+  }
+
+  if (signals.mentionsTopReporters) {
+    return { ...fallback, queryType: 'top_reporters', limit: Math.max(Number(fallback.limit) || 5, 5) };
+  }
+
+  if (signals.mentionsTrend) {
+    return { ...fallback, queryType: 'trend_summary', limit: 5 };
+  }
+
+  if (llm?.queryType && llm.queryType !== 'last_tickets') {
+    return {
+      ...fallback,
+      ...llm,
+      limit: Number(llm.limit || fallback.limit || 5),
+      daysBack: llm.daysBack ?? fallback.daysBack ?? null,
+      timeRange: llm.timeRange || fallback.timeRange || 'this_week',
+    };
+  }
+
+  return fallback;
+}
+
+/* =========================
+   DATA QUERIES
+========================= */
+
+async function getLastTickets(limit, timeRange = 'all', daysBack = null) {
   const { startDate, endDate } = getDateRange(timeRange, daysBack);
 
-  const tickets = await TicketModel.find({
+  return await TicketModel.find({
     createdAt: { $gte: startDate, $lte: endDate },
   })
+    .maxTimeMS(AI_DB_TIMEOUT_MS)
     .select('code subject description createdAt updatedAt priority department type status')
     .sort({ createdAt: -1 })
-    .limit(limit)
+    .limit(Math.max(Number(limit) || 5, 1))
     .lean();
-
-  return tickets.map(compactTicket);
 }
 
 async function getLastTicketDetail() {
-  const ticket = await TicketModel.findOne({})
-    .select('code subject description createdAt updatedAt requester updates')
+  return await TicketModel.findOne()
+    .maxTimeMS(AI_DB_TIMEOUT_MS)
+    .select('code subject description createdAt updatedAt requester')
     .populate('requester', 'name email')
     .sort({ createdAt: -1 })
     .lean();
-
-  if (!ticket) return null;
-
-  const reporter = ticket.requester && typeof ticket.requester === 'object'
-    ? {
-      id: ticket.requester._id || null,
-      name: ticket.requester.name || null,
-      email: ticket.requester.email || null,
-    }
-    : null;
-
-  const reporterText = buildReporterText(reporter);
-
-  return {
-    _id: ticket._id,
-    code: ticket.code,
-    subject: ticket.subject,
-    description: ticket.description,
-    createdAt: ticket.createdAt,
-    updatedAt: ticket.updatedAt,
-    reporter,
-    reporterText,
-    narrative: `${buildTicketNarrative(ticket)} Reportado por: ${reporterText}.`,
-  };
 }
 
-async function getTopReporters(limit, timeRange, daysBack = null) {
+async function getTopReporters(limit, timeRange = 'this_week', daysBack = null) {
   const { startDate, endDate } = getDateRange(timeRange, daysBack);
-  const rangeLabel = getRangeLabelWithDays(timeRange, daysBack);
 
-  const reporters = await TicketModel.aggregate([
+  return await TicketModel.aggregate([
     {
       $match: {
         createdAt: { $gte: startDate, $lte: endDate },
       },
     },
-    {
-      $group: {
-        _id: '$requester',
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { count: -1, _id: 1 } },
-    { $limit: Math.max(limit, 5) },
+    { $group: { _id: '$requester', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: Math.max(Number(limit) || 5, 1) },
     {
       $lookup: {
         from: 'users',
@@ -1074,12 +722,7 @@ async function getTopReporters(limit, timeRange, daysBack = null) {
         as: 'user',
       },
     },
-    {
-      $unwind: {
-        path: '$user',
-        preserveNullAndEmptyArrays: true,
-      },
-    },
+    { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
     {
       $project: {
         _id: 0,
@@ -1089,42 +732,22 @@ async function getTopReporters(limit, timeRange, daysBack = null) {
         email: { $ifNull: ['$user.email', null] },
       },
     },
-  ]);
-
-  const totalTickets = reporters.reduce((acc, row) => acc + (Number(row.count) || 0), 0);
-
-  const first = reporters[0];
-  const summary = first
-    ? `En ${rangeLabel}, el usuario que más reportó fue ${first.name}${first.email ? ` (${first.email})` : ''} con ${first.count} tickets.`
-    : `No encontré usuarios reportantes en ${rangeLabel}.`;
-
-  return {
-    rangeLabel,
-    totalTickets,
-    reporters,
-    summary,
-  };
+  ]).option({ maxTimeMS: AI_DB_TIMEOUT_MS });
 }
 
-async function getTopClosers(limit, timeRange, daysBack = null) {
+async function getTopClosers(limit, timeRange = 'this_week', daysBack = null) {
   const { startDate, endDate } = getDateRange(timeRange, daysBack);
-  const rangeLabel = getRangeLabelWithDays(timeRange, daysBack);
 
-  const closers = await TicketModel.aggregate([
+  return await TicketModel.aggregate([
     {
       $match: {
         closedBy: { $exists: true, $ne: null },
         closedAt: { $gte: startDate, $lte: endDate },
       },
     },
-    {
-      $group: {
-        _id: '$closedBy',
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { count: -1, _id: 1 } },
-    { $limit: Math.max(limit, 10) },
+    { $group: { _id: '$closedBy', count: { $sum: 1 } } },
+    { $sort: { count: -1 } },
+    { $limit: Math.max(Number(limit) || 5, 1) },
     {
       $lookup: {
         from: 'users',
@@ -1133,12 +756,7 @@ async function getTopClosers(limit, timeRange, daysBack = null) {
         as: 'user',
       },
     },
-    {
-      $unwind: {
-        path: '$user',
-        preserveNullAndEmptyArrays: true,
-      },
-    },
+    { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
     {
       $project: {
         _id: 0,
@@ -1148,501 +766,380 @@ async function getTopClosers(limit, timeRange, daysBack = null) {
         email: { $ifNull: ['$user.email', null] },
       },
     },
-  ]);
-
-  const totalTickets = closers.reduce((acc, row) => acc + (Number(row.count) || 0), 0);
-
-  const first = closers[0];
-  const summary = first
-    ? `En ${rangeLabel}, el agente que más cerró tickets fue ${first.name}${first.email ? ` (${first.email})` : ''} con ${first.count} tickets resueltos.`
-    : `No encontré agentes que hayan cerrado tickets en ${rangeLabel}.`;
-
-  return {
-    rangeLabel,
-    totalTickets,
-    closers,
-    summary,
-  };
+  ]).option({ maxTimeMS: AI_DB_TIMEOUT_MS });
 }
 
-async function getMostRepeatedCategories(limit, timeRange) {
-  const { startDate, endDate } = getDateRange(timeRange);
-
-  const stats = await TicketModel.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: startDate, $lte: endDate },
-      },
-    },
-    {
-      $group: {
-        _id: '$category',
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { count: -1 } },
-    { $limit: limit },
-  ]);
-
-  return stats;
-}
-
-async function getPriorityStats(timeRange, daysBack = null) {
+async function getTrendSummary(timeRange = 'this_week', daysBack = null) {
   const { startDate, endDate } = getDateRange(timeRange, daysBack);
-
-  const stats = await TicketModel.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: startDate, $lte: endDate },
-      },
-    },
-    {
-      $group: {
-        _id: '$priority',
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { count: -1 } },
-  ]);
-
-  return stats;
-}
-
-async function getStatusDistribution(timeRange, daysBack = null) {
-  const { startDate, endDate } = getDateRange(timeRange, daysBack);
-
-  const stats = await TicketModel.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: startDate, $lte: endDate },
-      },
-    },
-    {
-      $group: {
-        _id: '$status',
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { count: -1 } },
-  ]);
-
-  return stats;
-}
-
-async function getCategoryStats(category, timeRange, limit, daysBack = null) {
-  const { startDate, endDate } = getDateRange(timeRange, daysBack);
-
-  const tickets = await TicketModel.find({
-    category: new RegExp(category, 'i'),
-    createdAt: { $gte: startDate, $lte: endDate },
-  })
-    .select('code subject description createdAt updatedAt priority department type status')
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    .lean();
-
-  const count = await TicketModel.countDocuments({
-    category: new RegExp(category, 'i'),
-    createdAt: { $gte: startDate, $lte: endDate },
-  });
-
-  return { category, count, tickets: tickets.map(compactTicket) };
-}
-
-async function getRepeatedCauses(limit, timeRange, daysBack = null) {
-  const { startDate, endDate } = getDateRange(timeRange, daysBack);
-
-  const rows = await TicketModel.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: startDate, $lte: endDate },
-      },
-    },
-    {
-      $project: {
-        code: 1,
-        createdAt: 1,
-        subject: 1,
-        normalizedSubject: {
-          $trim: {
-            input: { $toLower: { $ifNull: ['$subject', 'sin asunto'] } },
-          },
-        },
-      },
-    },
-    {
-      $group: {
-        _id: '$normalizedSubject',
-        subject: { $first: '$subject' },
-        count: { $sum: 1 },
-        latestAt: { $max: '$createdAt' },
-        samples: {
-          $push: {
-            code: '$code',
-            createdAt: '$createdAt',
-          },
-        },
-      },
-    },
-    { $sort: { count: -1, latestAt: -1 } },
-    { $limit: Math.max(limit, 3) },
-  ]);
-
-  const totalTickets = await TicketModel.countDocuments({
-    createdAt: { $gte: startDate, $lte: endDate },
-  });
-
-  const top = rows[0] || null;
-  const rangeLabel = getRangeLabelWithDays(timeRange, daysBack);
-
-  const summary = !top
-    ? `No se encontraron tickets en ${rangeLabel}.`
-    : `En ${rangeLabel}, la causa más repetida fue "${top.subject || 'sin asunto'}" con ${top.count} de ${totalTickets} tickets.`;
-
-  return {
-    rangeLabel,
-    totalTickets,
-    causes: rows.map((row) => ({
-      subject: row.subject || 'Sin asunto',
-      count: row.count,
-      latestAt: row.latestAt,
-      samples: (row.samples || []).slice(0, 3),
-    })),
-    summary,
-  };
-}
-
-async function getDailyPeaks(limit, timeRange, daysBack = null) {
-  const { startDate, endDate } = getDateRange(timeRange, daysBack);
-  const rangeLabel = getRangeLabelWithDays(timeRange, daysBack);
-
-  const rows = await TicketModel.aggregate([
-    {
-      $match: {
-        createdAt: { $gte: startDate, $lte: endDate },
-      },
-    },
-    {
-      $group: {
-        _id: {
-          $dateToString: {
-            format: '%Y-%m-%d',
-            date: '$createdAt',
-            timezone: 'America/Santiago',
-          },
-        },
-        count: { $sum: 1 },
-      },
-    },
-    { $sort: { count: -1, _id: -1 } },
-  ]);
-
-  const topDays = rows.slice(0, Math.max(limit, 3)).map((row) => ({
-    day: row._id,
-    count: row.count,
-  }));
-
-  const totalTickets = rows.reduce((acc, row) => acc + Number(row.count || 0), 0);
-  const daysWithTickets = rows.length;
-  const avgPerDay = daysWithTickets > 0 ? Number((totalTickets / daysWithTickets).toFixed(2)) : 0;
-  const peak = topDays[0] || null;
-
-  const summary = !peak
-    ? `No se registran tickets en ${rangeLabel}.`
-    : `El día con más tickets en ${rangeLabel} fue ${peak.day} con ${peak.count} tickets. El promedio diario del período es ${avgPerDay}.`;
-
-  return {
-    rangeLabel,
-    totalTickets,
-    daysWithTickets,
-    avgPerDay,
-    peak,
-    topDays,
-    summary,
-  };
-}
-
-async function getTrendSummary(timeRange, daysBack = null) {
-  const analyzedRange = timeRange === 'all' ? 'last_30_days' : timeRange;
-  const currentRange = getDateRange(analyzedRange, daysBack);
-
-  const durationMs = currentRange.endDate.getTime() - currentRange.startDate.getTime();
-  const previousEnd = new Date(currentRange.startDate.getTime() - 1);
+  const durationMs = endDate.getTime() - startDate.getTime();
+  const previousEnd = new Date(startDate.getTime() - 1);
   const previousStart = new Date(previousEnd.getTime() - durationMs);
 
-  const currentFilter = {
-    createdAt: { $gte: currentRange.startDate, $lte: currentRange.endDate },
-  };
-
-  const previousFilter = {
-    createdAt: { $gte: previousStart, $lte: previousEnd },
-  };
-
-  const [
-    currentCount,
-    previousCount,
-    topTypes,
-    topDepartments,
-    topPriorities,
-    lookup,
-  ] = await Promise.all([
-    TicketModel.countDocuments(currentFilter),
-    TicketModel.countDocuments(previousFilter),
-    TicketModel.aggregate([
-      { $match: currentFilter },
-      { $group: { _id: '$type', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 3 },
-    ]),
-    TicketModel.aggregate([
-      { $match: currentFilter },
-      { $group: { _id: '$department', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 3 },
-    ]),
-    TicketModel.aggregate([
-      { $match: currentFilter },
-      { $group: { _id: '$priority', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 3 },
-    ]),
-    getListValueLookup(),
+  const [currentCount, previousCount, activeLists] = await Promise.all([
+    TicketModel.countDocuments({ createdAt: { $gte: startDate, $lte: endDate } }).maxTimeMS(AI_DB_TIMEOUT_MS),
+    TicketModel.countDocuments({ createdAt: { $gte: previousStart, $lte: previousEnd } }).maxTimeMS(AI_DB_TIMEOUT_MS),
+    List.countDocuments({ isDeleted: false }).maxTimeMS(AI_DB_TIMEOUT_MS).catch(() => 0),
   ]);
 
-  const topType = mapTopEntry(topTypes[0], lookup.type, 'Tipo no definido');
-  const topDepartment = mapTopEntry(topDepartments[0], lookup.department, 'Departamento no definido');
-  const topPriority = mapTopEntry(topPriorities[0], lookup.priority, 'Prioridad no definida');
-  const variation = calculateVariation(currentCount, previousCount);
-  const rangeLabel = getRangeLabelWithDays(analyzedRange, daysBack);
-
-  const summary = currentCount === 0
-    ? `No hay tickets en ${rangeLabel}, por lo que no se observa una tendencia clara.`
-    : `En ${rangeLabel} se registraron ${currentCount} tickets, con tendencia de ${variation.trend}${variation.trend === 'estable' ? '' : ` de ${variation.percentage}%`} respecto del período anterior. Predomina ${topType.label} (${topType.count}), principalmente en ${topDepartment.label}, con prioridad ${topPriority.label}.`;
+  const diff = currentCount - previousCount;
+  const trend = diff > 0 ? 'alza' : diff < 0 ? 'baja' : 'estable';
 
   return {
-    analyzedRange,
     currentCount,
     previousCount,
-    variation,
-    top: {
-      type: topType,
-      department: topDepartment,
-      priority: topPriority,
-    },
-    summary,
+    trend,
+    activeLists,
   };
 }
 
-async function generateAnalyticsResponse(queryParams) {
-  const { queryType, timeRange, limit, daysBack, category } = queryParams;
-  let data;
+/* =========================
+   ANALYTICS CORE
+========================= */
 
-  switch (queryType) {
+async function generateAnalyticsResponse(params) {
+  if (params?.queryType === 'dynamic_query' && params?.dynamicQuery) {
+    const data = await executeDynamicQuery(params.dynamicQuery);
+    return {
+      type: 'dynamic_query',
+      data,
+      dynamicQuery: params.dynamicQuery,
+    };
+  }
+
+  switch (params.queryType) {
     case 'last_tickets':
-      data = await getLastTickets(limit, timeRange, daysBack);
       return {
         type: 'last_tickets',
-        timeRange,
-        daysBack,
-        data,
-        summary: 'Se encontraron ' + data.length + ' tickets.',
-      };
-
-    case 'most_repeated':
-      data = await getMostRepeatedCategories(limit, timeRange);
-      return {
-        type: 'most_repeated',
-        timeRange,
-        data,
-        summary:
-          data.length > 0
-            ? 'La categoría más reportada es "' + data[0]._id + '" con ' + data[0].count + ' tickets.'
-            : 'No hay datos disponibles.',
+        data: await getLastTickets(params.limit, params.timeRange, params.daysBack),
       };
 
     case 'last_ticket_detail':
-      data = await getLastTicketDetail();
       return {
         type: 'last_ticket_detail',
-        timeRange: 'all',
-        data,
-        summary: data
-          ? data.narrative
-          : 'No hay tickets registrados para detallar.',
-      };
-
-    case 'trend_summary':
-      data = await getTrendSummary(timeRange, daysBack);
-      return {
-        type: 'trend_summary',
-        timeRange: data.analyzedRange,
-        daysBack,
-        data,
-        summary: data.summary,
-      };
-
-    case 'repeated_causes':
-      data = await getRepeatedCauses(limit, timeRange, daysBack);
-      return {
-        type: 'repeated_causes',
-        timeRange,
-        daysBack,
-        data,
-        summary: data.summary,
-      };
-
-    case 'daily_peaks':
-      data = await getDailyPeaks(limit, timeRange, daysBack);
-      return {
-        type: 'daily_peaks',
-        timeRange,
-        daysBack,
-        data,
-        summary: data.summary,
-      };
-
-    case 'top_closers':
-      data = await getTopClosers(limit, timeRange, daysBack);
-      return {
-        type: 'top_closers',
-        timeRange,
-        daysBack,
-        data,
-        summary: data.summary,
+        data: await getLastTicketDetail(),
       };
 
     case 'top_reporters':
-      data = await getTopReporters(limit, timeRange, daysBack);
       return {
         type: 'top_reporters',
-        timeRange,
-        daysBack,
-        data,
-        summary: data.summary,
+        data: await getTopReporters(params.limit, params.timeRange, params.daysBack),
       };
 
-    case 'category_stats':
-      data = await getCategoryStats(category || 'ticket', timeRange, limit, daysBack);
+    case 'top_closers':
       return {
-        type: 'category_stats',
-        category: data.category,
-        timeRange,
-        daysBack,
-        data: data.tickets,
-        summary: 'Se encontraron ' + data.count + ' tickets en la categoría "' + data.category + '".',
+        type: 'top_closers',
+        data: await getTopClosers(params.limit, params.timeRange, params.daysBack),
       };
 
-    case 'priority_stats':
-      data = await getPriorityStats(timeRange, daysBack);
+    case 'trend_summary':
       return {
-        type: 'priority_stats',
-        timeRange,
-        daysBack,
-        data,
-        summary:
-          data.length > 0
-            ? 'La prioridad más común es "' + data[0]._id + '" con ' + data[0].count + ' tickets.'
-            : 'No hay datos disponibles.',
-      };
-
-    case 'status_distribution':
-      data = await getStatusDistribution(timeRange, daysBack);
-      return {
-        type: 'status_distribution',
-        timeRange,
-        daysBack,
-        data,
-        summary: 'Se encontraron tickets con los siguientes estados: ' + data
-          .map((s) => s._id + ' (' + s.count + ')')
-          .join(', ') + '.',
+        type: 'trend_summary',
+        data: await getTrendSummary(params.timeRange, params.daysBack),
       };
 
     default:
-      return {
-        type: 'unknown',
-        error: 'Tipo de consulta no reconocido',
-      };
+      return { type: 'unknown' };
   }
 }
 
-export async function askAnalytics(question) {
-  try {
-    const llmQueryParams = await interpretQuestion(question);
-    const fallbackParams = fallbackInterpretQuestion(question);
-    const selectedParams = chooseBestQueryParams(llmQueryParams, fallbackParams, question);
-    const queryParams = applyQuestionGuards(question, selectedParams, fallbackParams);
+/* =========================
+   DETERMINISTIC RESPONSE
+========================= */
 
-    if (!queryParams) {
-      return {
-        success: false,
-        error: 'No se pudo interpretar la pregunta. Intenta con: "¿Cuáles fueron los últimos 5 tickets?"',
-      };
+function buildDeterministicAnswer(question, analytics) {
+  if (analytics.type === 'dynamic_query') {
+    const rows = Array.isArray(analytics.data) ? analytics.data : [];
+    if (!rows.length) return 'No encontré resultados para esa consulta.';
+
+    const sample = rows.slice(0, 3).map((row) => {
+      if (row?.name && typeof row.count !== 'undefined') {
+        return `${row.name}: ${row.count}`;
+      }
+
+      if (row?._id && typeof row.count !== 'undefined') {
+        return `${String(row._id)}: ${row.count}`;
+      }
+
+      if (row?.code) {
+        return `${row.code} - ${row.subject || 'sin asunto'}`;
+      }
+
+      return JSON.stringify(row);
+    }).join('; ');
+
+    return `Encontré ${rows.length} resultados. Muestra: ${sample}`;
+  }
+
+  if (analytics.type === 'last_ticket_detail') {
+    const subject = analytics.data?.subject || 'sin asunto';
+    const code = analytics.data?.code ? ` (${analytics.data.code})` : '';
+    return `El último ticket${code} es "${subject}".`;
+  }
+
+  if (analytics.type === 'top_reporters') {
+    const top = analytics.data?.[0];
+    if (!top) return 'No encontré reportantes en el período consultado.';
+    return `El usuario que más reportó fue ${top.name || 'N/D'} con ${top.count || 0} tickets.`;
+  }
+
+  if (analytics.type === 'top_closers') {
+    const top = analytics.data?.[0];
+    if (!top) return 'No encontré agentes que hayan cerrado tickets en el período consultado.';
+    return `El agente que más cerró tickets fue ${top.name || 'N/D'} con ${top.count || 0} cierres.`;
+  }
+
+  if (analytics.type === 'trend_summary') {
+    const current = Number(analytics.data?.currentCount || 0);
+    const previous = Number(analytics.data?.previousCount || 0);
+    const trend = analytics.data?.trend || 'estable';
+    return `Se registran ${current} tickets en el período actual vs ${previous} en el anterior, con tendencia ${trend}.`;
+  }
+
+  if (analytics.type === 'last_tickets') {
+    const count = analytics.data?.length || 0;
+    if (!count) return 'No encontré tickets en el período consultado.';
+    const first = analytics.data[0];
+    return `Se encontraron ${count} tickets. El más reciente es ${first?.code || 'sin código'}: ${first?.subject || 'sin asunto'}.`;
+  }
+
+  return 'Procesé tu consulta.';
+}
+
+/* =========================
+   LLM RESPONSE
+========================= */
+
+async function improveWithLLM(question, digest) {
+  try {
+    const result = await generateWithModelFallback(
+      RESPONDER_MODELS,
+      (model) => ({
+        model,
+        prompt: `Eres analista senior.\n\nPregunta: ${question}\nDatos: ${JSON.stringify(digest)}\n\nDa insight claro en 2 líneas.`,
+        stream: false,
+      }),
+      'improve_response'
+    );
+
+    if (!result.ok) {
+      console.warn('[AI Analytics] RESPONDER_ALL_FAILED', { errors: result.errors });
+      return null;
     }
 
-    const analytics = await generateAnalyticsResponse(queryParams);
+    return {
+      text: result.data?.response?.trim() || null,
+      model: result.model,
+      provider: result.provider,
+    };
+  } catch {
+    return null;
+  }
+}
 
-    const analyticsDigest = buildAnalyticsDigest(analytics);
+/* =========================
+   MAIN ENTRY
+========================= */
 
-    const agentPrompt = 'Eres un analista senior de mesa de ayuda.\n' +
-      'RESPONDE LA PREGUNTA DEL USUARIO, NO LISTES DATOS CRUDOS NI JSON.\n' +
-      'Pregunta del usuario: ' + question + '\n' +
-      'Datos resumidos: ' + JSON.stringify(analyticsDigest) + '\n\n' +
-      'Reglas de respuesta:\n' +
-      '1) Responde directo en 2-4 líneas.\n' +
-      '2) Incluye interpretación (tendencia, causa principal o conclusión).\n' +
-      '3) Si faltan datos, dilo explícitamente y sugiere siguiente consulta útil.\n' +
-      '4) No enumeres tickets completos salvo que el usuario lo pida explícitamente.\n' +
-      '5) No uses JSON ni markdown.\n';
+export async function askAnalytics(question) {
+  return askAnalyticsWithProgress(question);
+}
 
-    let agentText = buildDeterministicAnswer(question, analytics);
-    let llmSummaryUsed = false;
-    let interpreterModelUsed = llmQueryParams?.__interpreterModel || null;
-    let responderModelUsed = null;
+async function askAnalyticsWithProgress(question, options = {}) {
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  const startedAt = Date.now();
 
-    try {
-      const responseResult = await generateWithModelFallback(
-        RESPONDER_MODELS,
-        (model) => ({
-          model,
-          prompt: agentPrompt,
-          stream: false,
-          temperature: 0.3,
-          options: {
-            num_predict: 180,
-          },
-        })
-      );
+  console.log('[AI Analytics] START', {
+    at: new Date().toISOString(),
+    question,
+  });
 
-      if (responseResult.ok) {
-        const agentData = responseResult.data;
-        const candidate = (agentData.response || '').trim();
+  const emit = (stage, payload = {}) => {
+    const eventPayload = {
+      stage,
+      ts: new Date().toISOString(),
+      elapsedMs: Date.now() - startedAt,
+      ...payload,
+    };
 
-        if (!isLowQualityAnswer(candidate, question, analytics, agentText)) {
-          agentText = candidate;
-          llmSummaryUsed = true;
-          responderModelUsed = responseResult.model;
+    console.log('[AI Analytics] STAGE', eventPayload);
+    if (!onProgress) return;
+    onProgress(eventPayload);
+  };
+
+  try {
+    // =========================
+    // 1. INTERPRETACIÓN (SMART)
+    // =========================
+    emit('interpreting', { message: 'Interpretando intención de la consulta.' });
+
+    const signals = getQuestionSignals(question);
+    let llm = null;
+
+    const isDirectIntent =
+      signals.mentionsTopReporters ||
+      signals.mentionsTopClosers ||
+      signals.mentionsTrend ||
+      signals.mentionsReporter ||
+      signals.asksLastTickets;
+
+    if (!isDirectIntent) {
+      console.log('[AI] USING_LLM_INTERPRETATION', { question });
+
+      emit('interpreting_llm', {
+        message: 'Consultando modelo de IA...'
+      });
+
+      llm = await interpretQuestion(question);
+    } else {
+      console.log('[AI] USING_HEURISTICS_ONLY', { question });
+    }
+
+    // =========================
+    // 2. RESOLVER INTENCIÓN
+    // =========================
+    emit('resolving_intent', { message: 'Resolviendo intención final.' });
+
+    const fallback = fallbackInterpretQuestion(question);
+    const params = resolveFinalIntent({ llm, fallback, question });
+    const llmUnsupportedQueryType = llm?.queryType && !KNOWN_QUERY_TYPES.has(String(llm.queryType));
+
+    const shouldTryDynamicPlanner =
+      !isDirectIntent &&
+      (!llm?.queryType || llm.queryType === 'last_tickets' || !KNOWN_QUERY_TYPES.has(String(llm.queryType)));
+
+    if (shouldTryDynamicPlanner) {
+      emit('planning_query', { message: 'Planificando consulta dinámica segura.' });
+      const planned = await planDynamicQuery(question);
+
+      if (planned.ok) {
+        params.queryType = 'dynamic_query';
+        params.dynamicQuery = planned.query;
+        params.__dynamicPlannerModel = planned.model || null;
+        params.__dynamicPlannerProvider = planned.provider || null;
+      } else {
+        console.warn('[AI Analytics] DYNAMIC_PLANNER_SKIPPED', {
+          reason: planned.reason,
+          errors: planned.errors,
+        });
+
+        if (llmUnsupportedQueryType) {
+          params.queryType = fallback.queryType;
+          params.timeRange = fallback.timeRange;
+          params.limit = fallback.limit;
+          params.daysBack = fallback.daysBack;
         }
       }
-    } catch (_) {
     }
 
-    if (!interpreterModelUsed && llmQueryParams) {
-      interpreterModelUsed = INTERPRETER_MODELS[0] || null;
+    // =========================
+    // 3. CONSULTA A BD
+    // =========================
+    emit('querying_data', {
+      message: 'Consultando datos de tickets.',
+      queryType: params.queryType,
+      timeRange: params.timeRange,
+      limit: params.limit,
+    });
+
+    assertMongoConnected();
+
+    const analytics = await withTimeout(
+      generateAnalyticsResponse(params),
+      AI_DB_TIMEOUT_MS + 2000,
+      'QUERYING_DATA'
+    );
+
+    console.log('[AI Analytics] DATA_READY', {
+      queryType: analytics.type,
+      elapsedMs: Date.now() - startedAt,
+    });
+
+    // =========================
+    // 4. RESPUESTA BASE
+    // =========================
+    emit('building_answer', { message: 'Construyendo respuesta base.' });
+
+    let answer = buildDeterministicAnswer(question, analytics);
+    let llmSummaryUsed = false;
+
+    // =========================
+    // 5. MEJORA CON LLM (OPCIONAL)
+    // =========================
+    emit('generating_response', {
+      message: 'Mejorando redacción con IA (opcional)...'
+    });
+
+    let improved = null;
+
+    try {
+      improved = await improveWithLLM(question, analytics);
+    } catch (err) {
+      console.warn('[AI] LLM improve failed:', err.message);
     }
+
+    const improvedText = improved?.text || null;
+
+    if (improvedText && improvedText.length > 30) {
+      answer = improvedText;
+      llmSummaryUsed = true;
+
+      console.log('[AI Analytics] LLM_RESPONSE_ACCEPTED', {
+        elapsedMs: Date.now() - startedAt,
+        model: improved?.model || null,
+        provider: improved?.provider || null,
+      });
+    } else {
+      console.log('[AI Analytics] USING_DETERMINISTIC_RESPONSE', {
+        elapsedMs: Date.now() - startedAt,
+      });
+    }
+
+    // =========================
+    // 6. META
+    // =========================
+    const confidence = llmSummaryUsed ? 0.85 : 0.72;
+    const passedConfidence = confidence >= AI_MIN_CONFIDENCE;
+
+    emit('completed', {
+      message: 'Análisis completado.',
+      queryType: analytics.type,
+      llmSummaryUsed,
+      confidence,
+      totalMs: Date.now() - startedAt,
+    });
 
     return {
       success: true,
       question,
-      agentResponse: agentText,
+      params,
       analytics,
+      answer,
+      agentResponse: answer,
       meta: {
         llmSummaryUsed,
-        interpreterModelUsed,
-        responderModelUsed,
+        confidence,
+        passedConfidence,
+        interpreterModelUsed: llm?.__interpreterModel || null,
+        interpreterProvider: llm?.__interpreterProvider || null,
+        dynamicPlannerModelUsed: params.__dynamicPlannerModel || null,
+        dynamicPlannerProvider: params.__dynamicPlannerProvider || null,
+        responderModelUsed: llmSummaryUsed ? improved?.model || null : null,
+        responderProvider: llmSummaryUsed ? improved?.provider || null : null,
       },
     };
+
   } catch (error) {
-    console.error('[Analytics] Error:', error.message);
+    console.error('[AI Analytics] FAILED', {
+      error: error.message,
+      elapsedMs: Date.now() - startedAt,
+    });
+
+    emit('failed', {
+      message: 'Falló el procesamiento de la consulta.',
+      error: error.message,
+      totalMs: Date.now() - startedAt,
+    });
+
     return {
       success: false,
       error: 'Error procesando la consulta',
@@ -1650,19 +1147,9 @@ export async function askAnalytics(question) {
     };
   }
 }
+export { askAnalyticsWithProgress };
 
 export default {
   askAnalytics,
-  interpretQuestion,
-  getLastTickets,
-  getLastTicketDetail,
-  getTrendSummary,
-  getRepeatedCauses,
-  getDailyPeaks,
-  getTopReporters,
-  getTopClosers,
-  getMostRepeatedCategories,
-  getPriorityStats,
-  getStatusDistribution,
-  getCategoryStats,
+  askAnalyticsWithProgress,
 };
