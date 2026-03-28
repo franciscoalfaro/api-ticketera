@@ -19,8 +19,8 @@ export const login = async (req, res) => {
       return res.status(result.status).json({ status: "error", message: result.message });
     }
 
-    res.cookie('access_token', result.accessToken, { httpOnly: true, secure: true, sameSite: 'None' });
-    res.cookie('refresh_token', result.refreshToken, { httpOnly: true, secure: true, sameSite: 'None' });
+    res.cookie('access_token', result.accessToken, { httpOnly: true, secure: true, sameSite: 'Strict' });
+    res.cookie('refresh_token', result.refreshToken, { httpOnly: true, secure: true, sameSite: 'Strict' });
 
     await createLog({
       user: result.user?.id || result.user?._id || null,

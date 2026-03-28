@@ -22,7 +22,7 @@ export const auth = async (req, res, next) => {
   }
 
   try {
-    let payload = jwt.decode(token, secret_key, true);
+    let payload = jwt.decode(token, secret_key);
 
     if (payload.exp <= moment().unix()) {
       // Token expirado, intentar renovar
@@ -45,7 +45,7 @@ export const auth = async (req, res, next) => {
 
         // Generar nuevo access token
         const newAccessToken = createToken({ id: refreshPayload.id });
-        res.cookie("access_token", newAccessToken, { httpOnly: true, secure: true, sameSite: "None" });
+        res.cookie("access_token", newAccessToken, { httpOnly: true, secure: true, sameSite: "Strict" });
 
         // Actualizar la solicitud con el nuevo access token
         req.cookies.access_token = newAccessToken;
