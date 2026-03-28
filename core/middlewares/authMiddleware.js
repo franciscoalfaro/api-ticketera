@@ -1,7 +1,5 @@
 // src/core/middlewares/authMiddleware.js
-import jwt from "jwt-simple";
-import moment from "moment";
-import { secret_key, refresh_secret_key, createToken } from "../services/jwt.js";
+import { createToken, verifyAccessToken, verifyRefreshToken } from "../services/jwt.js";
 import { isBlacklisted } from "../services/tokenBlacklist.js";
 
 export const auth = async (req, res, next) => {
@@ -22,10 +20,15 @@ export const auth = async (req, res, next) => {
   }
 
   try {
-    let payload = jwt.decode(token, secret_key);
+    let payload;
 
-    if (payload.exp <= moment().unix()) {
-      // Token expirado, intentar renovar
+    try {
+      payload = verifyAccessToken(token);
+    } catch (error) {
+      if (error.name !== "TokenExpiredError") {
+        throw error;
+      }
+
       const refreshToken = req.cookies.refresh_token;
       if (!refreshToken) {
         return res.status(401).send({
@@ -34,14 +37,15 @@ export const auth = async (req, res, next) => {
         });
       }
 
+      if (await isBlacklisted(refreshToken)) {
+        return res.status(401).send({
+          status: "error",
+          message: "Refresh token revocado"
+        });
+      }
+
       try {
-        let refreshPayload = jwt.decode(refreshToken, refresh_secret_key);
-        if (refreshPayload.exp <= moment().unix()) {
-          return res.status(401).send({
-            status: "error",
-            message: "Refresh token expired"
-          });
-        }
+        const refreshPayload = verifyRefreshToken(refreshToken);
 
         // Generar nuevo access token
         const newAccessToken = createToken({ id: refreshPayload.id });
@@ -49,12 +53,13 @@ export const auth = async (req, res, next) => {
 
         // Actualizar la solicitud con el nuevo access token
         req.cookies.access_token = newAccessToken;
-        payload = jwt.decode(newAccessToken, secret_key);
+        payload = verifyAccessToken(newAccessToken);
       } catch (error) {
         console.error("Error decoding refresh token:", error);
+        const message = error.name === "TokenExpiredError" ? "Refresh token expired" : "Invalid refresh token";
         return res.status(401).send({
           status: "error",
-          message: "Invalid refresh token"
+          message
         });
       }
     }
@@ -63,7 +68,7 @@ export const auth = async (req, res, next) => {
 
   } catch (error) {
     console.error("Error decoding access token:", error);
-    return res.status(404).send({
+    return res.status(401).send({
       status: "error",
       message: "Token inválido"
     });

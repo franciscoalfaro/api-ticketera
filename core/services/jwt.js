@@ -2,8 +2,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import jwt from "jwt-simple";
-import moment from "moment";
+import jwt from "jsonwebtoken";
 import crypto from "crypto";
 
 const secret_key = process.env.SECRET_KEY;
@@ -19,24 +18,30 @@ export const createToken = (user) => {
     name: user.name,
     surname: user.surname,
     email: user.email,
-    role: user.role,
-    jti: crypto.randomUUID(),
-    iat: moment().unix(),
-    exp: moment().add(1, "days").unix() // Short lifespan for access token
+    role: user.role
   };
-  return jwt.encode(payload, secret_key);
+
+  return jwt.sign(payload, secret_key, {
+    expiresIn: "1d",
+    jwtid: crypto.randomUUID(),
+  });
 };
 
 export const createRefreshToken = (user) => {
   const userId = resolveUserId(user);
 
-  const payload = {
-    id: userId,
-    jti: crypto.randomUUID(),
-    iat: moment().unix(),
-    exp: moment().add(30, "days").unix() // Long lifespan for refresh token
-  };
-  return jwt.encode(payload, refresh_secret_key);
+  return jwt.sign(
+    { id: userId },
+    refresh_secret_key,
+    {
+      expiresIn: "30d",
+      jwtid: crypto.randomUUID(),
+    }
+  );
 };
+
+export const verifyAccessToken = (token) => jwt.verify(token, secret_key);
+
+export const verifyRefreshToken = (token) => jwt.verify(token, refresh_secret_key);
 
 export { secret_key, refresh_secret_key };
