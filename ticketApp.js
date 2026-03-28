@@ -102,6 +102,8 @@ app.use('/uploads/enterprise', express.static(path.join('uploads/enterprise')));
 // 1. carpeta uploads (privada, protegida por auth middleware)
 app.use('/uploads', uploadRoutes);
 
+app.disable('x-powered-by');
+
 // ==============================
 // 🔹 Rutas
 // ==============================

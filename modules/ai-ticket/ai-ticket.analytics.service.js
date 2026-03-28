@@ -116,6 +116,14 @@ const INTENT_MAP = [
       /(lista|listado).*(tickets?)/,
     ],
   },
+  {
+    queryType: 'top_closers',
+    patterns: [
+      /(agente|agentes|quien|quién).*(cerro|cerró|resolvio|resolvió|cierr).*(mas|más).*(tickets?)/,
+      /(agente|agentes).*(mas|más).*(cerr|resol).*(tickets?)/,
+      /top\s+(agentes?)\s+(cerr|resol)/,
+    ],
+  },
 ];
 
 async function generateWithModelFallback(models, buildPayload) {
@@ -279,6 +287,14 @@ function getQuestionSignals(question) {
       (q.includes('report') || q.includes('gener') || q.includes('cre'))
     );
 
+  const mentionsTopClosers =
+    mappedIntent === 'top_closers' ||
+    (
+      (q.includes('agente') || q.includes('agentes')) &&
+      (q.includes('cerro') || q.includes('cerró') || q.includes('resolvio') || q.includes('resolvió') || q.includes('cierr') || q.includes('resol')) &&
+      (q.includes('mas ticket') || q.includes('más ticket') || q.includes('mas ') || q.includes('más '))
+    );
+
   const asksLastTicketDetail =
     (q.includes('último ticket') || q.includes('ultimo ticket')) &&
     (
@@ -307,6 +323,7 @@ function getQuestionSignals(question) {
     mentionsRepeatedCauses,
     mentionsReporter,
     mentionsTopReporters,
+    mentionsTopClosers,
     asksLastTicketDetail,
     asksLastTickets,
   };
@@ -328,6 +345,10 @@ function fallbackInterpretQuestion(question) {
   else if (text.includes('últimos 30') || text.includes('ultimos 30')) timeRange = 'last_30_days';
   else if (daysBack && daysBack > 0) timeRange = 'last_n_days';
   else if (text.includes('todos') || text.includes('all')) timeRange = 'all';
+
+  if (signals.mappedIntent === 'top_closers' || signals.mentionsTopClosers) {
+    return { queryType: 'top_closers', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
+  }
 
   if (signals.mappedIntent === 'top_reporters' || signals.mentionsTopReporters) {
     return { queryType: 'top_reporters', timeRange, limit: Math.max(limit, 5), daysBack, category: null };
@@ -422,6 +443,14 @@ function chooseBestQueryParams(llmParams, fallbackParams, question = '') {
   }
 
   if (llmType === 'last_ticket_detail' && fallbackType === 'top_reporters') {
+    return fallbackParams;
+  }
+
+  if (llmType === 'last_tickets' && fallbackType === 'top_closers') {
+    return fallbackParams;
+  }
+
+  if (llmType === 'last_ticket_detail' && fallbackType === 'top_closers') {
     return fallbackParams;
   }
 
@@ -707,6 +736,15 @@ function buildAnalyticsDigest(analytics) {
         reporters: (analytics.data?.reporters || []).slice(0, 5),
       };
 
+    case 'top_closers':
+      return {
+        type: analytics.type,
+        summary: analytics.summary,
+        rangeLabel: analytics.data?.rangeLabel,
+        totalTickets: analytics.data?.totalTickets || 0,
+        closers: (analytics.data?.closers || []).slice(0, 5),
+      };
+
     case 'most_repeated':
     case 'priority_stats':
     case 'status_distribution':
@@ -786,6 +824,16 @@ function buildDeterministicAnswer(question, analytics) {
     return `${analytics.summary}${others ? ` Luego aparecen ${others}.` : ''}`;
   }
 
+  if (analytics.type === 'top_closers') {
+    const first = analytics.data?.closers?.[0];
+    if (!first) return 'No encontré agentes que hayan cerrado tickets en el período consultado.';
+    const others = (analytics.data?.closers || [])
+      .slice(1, 3)
+      .map((item) => `${item.name} (${item.count})`)
+      .join(', ');
+    return `${analytics.summary}${others ? ` Luego aparecen ${others}.` : ''}`;
+  }
+
   if (analytics.type === 'most_repeated') {
     const top = analytics.data?.[0];
     if (!top) return 'No hay suficientes datos para identificar la categoría más reportada.';
@@ -837,6 +885,14 @@ function applyQuestionGuards(question, queryParams, fallbackParams) {
     return {
       ...base,
       queryType: 'top_reporters',
+      limit: Math.max(Number(base.limit) || 5, 5),
+    };
+  }
+
+  if (signals.mentionsTopClosers) {
+    return {
+      ...base,
+      queryType: 'top_closers',
       limit: Math.max(Number(base.limit) || 5, 5),
     };
   }
@@ -917,6 +973,10 @@ function isLowQualityAnswer(text, question, analytics, deterministicAnswer) {
   }
 
   if (analytics?.type === 'top_reporters' && !/(usuario|usuarios|reportante|reportaron|tickets|top)/.test(normalized)) {
+    return true;
+  }
+
+  if (analytics?.type === 'top_closers' && !/(agente|agentes|cerr|resol|tickets|top)/.test(normalized)) {
     return true;
   }
 
@@ -1042,6 +1102,65 @@ async function getTopReporters(limit, timeRange, daysBack = null) {
     rangeLabel,
     totalTickets,
     reporters,
+    summary,
+  };
+}
+
+async function getTopClosers(limit, timeRange, daysBack = null) {
+  const { startDate, endDate } = getDateRange(timeRange, daysBack);
+  const rangeLabel = getRangeLabelWithDays(timeRange, daysBack);
+
+  const closers = await TicketModel.aggregate([
+    {
+      $match: {
+        closedBy: { $exists: true, $ne: null },
+        closedAt: { $gte: startDate, $lte: endDate },
+      },
+    },
+    {
+      $group: {
+        _id: '$closedBy',
+        count: { $sum: 1 },
+      },
+    },
+    { $sort: { count: -1, _id: 1 } },
+    { $limit: Math.max(limit, 10) },
+    {
+      $lookup: {
+        from: 'users',
+        localField: '_id',
+        foreignField: '_id',
+        as: 'user',
+      },
+    },
+    {
+      $unwind: {
+        path: '$user',
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        agentId: '$_id',
+        count: 1,
+        name: { $ifNull: ['$user.name', 'Agente no identificado'] },
+        email: { $ifNull: ['$user.email', null] },
+      },
+    },
+  ]);
+
+  const totalTickets = closers.reduce((acc, row) => acc + (Number(row.count) || 0), 0);
+
+  const first = closers[0];
+  const summary = first
+    ? `En ${rangeLabel}, el agente que más cerró tickets fue ${first.name}${first.email ? ` (${first.email})` : ''} con ${first.count} tickets resueltos.`
+    : `No encontré agentes que hayan cerrado tickets en ${rangeLabel}.`;
+
+  return {
+    rangeLabel,
+    totalTickets,
+    closers,
     summary,
   };
 }
@@ -1382,6 +1501,16 @@ async function generateAnalyticsResponse(queryParams) {
         summary: data.summary,
       };
 
+    case 'top_closers':
+      data = await getTopClosers(limit, timeRange, daysBack);
+      return {
+        type: 'top_closers',
+        timeRange,
+        daysBack,
+        data,
+        summary: data.summary,
+      };
+
     case 'top_reporters':
       data = await getTopReporters(limit, timeRange, daysBack);
       return {
@@ -1531,6 +1660,7 @@ export default {
   getRepeatedCauses,
   getDailyPeaks,
   getTopReporters,
+  getTopClosers,
   getMostRepeatedCategories,
   getPriorityStats,
   getStatusDistribution,
