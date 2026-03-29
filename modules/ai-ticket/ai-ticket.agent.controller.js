@@ -9,6 +9,42 @@ const sendSseEvent = (res, event, payload) => {
   res.write(`data: ${JSON.stringify(payload)}\n\n`);
 };
 
+const getSseLogStatus = (event, payload = {}) => {
+  if (event === 'error') return 'error';
+  if (event === 'warning') return 'warning';
+  if (event === 'done') return payload?.success ? 'success' : 'warning';
+  if (event === 'result' || event === 'timeline') return 'success';
+  return 'info';
+};
+
+const buildSseLogDescription = (event, payload = {}) => {
+  if (event === 'progress') {
+    return `SSE progress stage=${payload?.stage || 'unknown'} elapsedMs=${payload?.elapsedMs ?? 'n/a'}`;
+  }
+
+  if (event === 'timeline') {
+    return `SSE timeline success=${payload?.success ?? false} totalMs=${payload?.totalMs ?? 'n/a'} queryType=${payload?.queryType || 'n/a'}`;
+  }
+
+  if (event === 'result') {
+    return `SSE result success=${payload?.success ?? false} queryType=${payload?.analytics?.type || 'n/a'} question="${payload?.question || ''}"`;
+  }
+
+  if (event === 'done') {
+    return `SSE done success=${payload?.success ?? false}`;
+  }
+
+  if (event === 'error') {
+    return `SSE error code=${payload?.code || 'STREAM_ERROR'} detail=${payload?.details || payload?.error || 'n/a'}`;
+  }
+
+  if (event === 'warning') {
+    return `SSE warning code=${payload?.code || 'warning'} message=${payload?.message || 'n/a'}`;
+  }
+
+  return `SSE event=${event}`;
+};
+
 /**
  * POST /api/ai-ticket/ask
  * Agente IA de reportería que responde preguntas sobre tickets
@@ -92,6 +128,25 @@ export async function askAgentStream(req, res) {
   let lastProgressAt = Date.now();
   let lastStage = 'received';
 
+  const emitSse = (event, payload, options = {}) => {
+    const shouldLog = options.log !== false;
+    sendSseEvent(res, event, payload);
+
+    if (!shouldLog) return;
+
+    createLog({
+      action: 'AI_AGENT_STREAM_EVENT',
+      module: 'ai-ticket',
+      description: buildSseLogDescription(event, payload),
+      user: userId,
+      method: event,
+      status: getSseLogStatus(event, payload),
+      ip: req.clientIp || req.ip || null,
+    }).catch((error) => {
+      console.warn('[AI Stream] createLog EVENT failed:', error.message);
+    });
+  };
+
   console.log('[AI Stream] START', {
     at: new Date().toISOString(),
     question,
@@ -125,7 +180,7 @@ export async function askAgentStream(req, res) {
   const heartbeat = setInterval(() => {
     if (!closed) {
       console.log('[AI Stream] HEARTBEAT', { elapsedMs: Date.now() - streamStartedAt });
-      sendSseEvent(res, 'ping', { ts: new Date().toISOString() });
+      emitSse('ping', { ts: new Date().toISOString() }, { log: false });
     }
   }, 15000);
 
@@ -135,7 +190,7 @@ export async function askAgentStream(req, res) {
     if (elapsedMs >= 15000) {
       slowWarningSent = true;
       console.warn('[AI Stream] SLOW_ANALYSIS', { elapsedMs });
-      sendSseEvent(res, 'warning', {
+      emitSse('warning', {
         code: 'SLOW_ANALYSIS',
         message: 'La consulta está tardando más de lo normal, seguimos procesando.',
         elapsedMs,
@@ -149,7 +204,7 @@ export async function askAgentStream(req, res) {
     if (withoutProgressMs >= AI_STAGE_STALL_MS) {
       stallWarningSent = true;
       console.warn('[AI Stream] STAGE_STALLED', { lastStage, withoutProgressMs });
-      sendSseEvent(res, 'warning', {
+      emitSse('warning', {
         code: 'STAGE_STALLED',
         message: `Sin progreso en etapa "${lastStage}" por más de ${Math.round(withoutProgressMs / 1000)}s.`,
         lastStage,
@@ -160,15 +215,19 @@ export async function askAgentStream(req, res) {
 
   try {
     console.log('[AI Stream] STAGE received');
-    sendSseEvent(res, 'status', {
+    emitSse('status', {
       stage: 'received',
       message: 'Pregunta recibida, iniciando análisis.',
-    });
+    }, { log: false });
 
     createLog({
       action: 'AI_AGENT_QUESTION_STREAM',
+      module: 'ai-ticket',
       description: `Pregunta streaming al agente IA: "${question}"`,
       user: userId,
+      method: 'status',
+      status: 'info',
+      ip: req.clientIp || req.ip || null,
       timestamp: new Date(),
     }).catch((error) => {
       console.warn('[AI Stream] createLog QUESTION_STREAM failed:', error.message);
@@ -177,10 +236,10 @@ export async function askAgentStream(req, res) {
     if (closed) return;
 
     console.log('[AI Stream] STAGE analyzing');
-    sendSseEvent(res, 'status', {
+    emitSse('status', {
       stage: 'analyzing',
       message: 'Analizando la consulta y preparando respuesta.',
-    });
+    }, { log: false });
     lastProgressAt = Date.now();
     lastStage = 'analyzing';
 
@@ -200,7 +259,7 @@ export async function askAgentStream(req, res) {
             lastStage = progress?.stage || lastStage;
             stallWarningSent = false;
             console.log('[AI Stream] PROGRESS', progress);
-            sendSseEvent(res, 'progress', progress);
+            emitSse('progress', progress);
           },
         }),
         timeoutPromise,
@@ -220,37 +279,45 @@ export async function askAgentStream(req, res) {
     if (!result.success) {
       createLog({
         action: 'AI_AGENT_STREAM_ERROR',
+        module: 'ai-ticket',
         description: `Error en consulta streaming: ${result.error}`,
         user: userId,
+        method: 'error',
+        status: 'error',
+        ip: req.clientIp || req.ip || null,
       }).catch((error) => {
         console.warn('[AI Stream] createLog STREAM_ERROR failed:', error.message);
       });
 
-      sendSseEvent(res, 'error', {
+      emitSse('error', {
         success: false,
         error: result.error,
         details: result.details || null,
       });
-      sendSseEvent(res, 'done', { success: false });
+      emitSse('done', { success: false });
       return;
     }
 
     createLog({
       action: 'AI_AGENT_STREAM_SUCCESS',
+      module: 'ai-ticket',
       description: `Análisis streaming completado. Tipo: ${result.analytics?.type}`,
       user: userId,
+      method: 'done',
+      status: 'success',
+      ip: req.clientIp || req.ip || null,
     }).catch((error) => {
       console.warn('[AI Stream] createLog STREAM_SUCCESS failed:', error.message);
     });
 
-    sendSseEvent(res, 'timeline', {
+    emitSse('timeline', {
       totalMs: Date.now() - streamStartedAt,
       success: true,
       queryType: result.analytics?.type || null,
     });
 
-    sendSseEvent(res, 'result', result);
-    sendSseEvent(res, 'done', { success: true });
+    emitSse('result', result);
+    emitSse('done', { success: true });
     console.log('[AI Stream] DONE success', { elapsedMs: Date.now() - streamStartedAt });
   } catch (error) {
     console.error('[AI Agent Stream] Error:', error);
@@ -259,24 +326,28 @@ export async function askAgentStream(req, res) {
 
     createLog({
       action: 'AI_AGENT_STREAM_EXCEPTION',
+      module: 'ai-ticket',
       description: `Excepción streaming: ${error.message}`,
       user: userId,
+      method: 'error',
+      status: 'error',
+      ip: req.clientIp || req.ip || null,
     }).catch((logError) => {
       console.warn('[AI Stream] createLog STREAM_EXCEPTION failed:', logError.message);
     });
 
     if (!closed) {
-      sendSseEvent(res, 'error', {
+      emitSse('error', {
         success: false,
         error: isTimeout ? 'Tiempo máximo de análisis excedido' : 'Error procesando la pregunta en streaming',
         code: isTimeout ? 'STREAM_TIMEOUT' : 'STREAM_ERROR',
         details: error.message,
       });
-      sendSseEvent(res, 'timeline', {
+      emitSse('timeline', {
         totalMs: Date.now() - streamStartedAt,
         success: false,
       });
-      sendSseEvent(res, 'done', { success: false });
+      emitSse('done', { success: false });
     }
   } finally {
     console.log('[AI Stream] END', { elapsedMs: Date.now() - streamStartedAt, closed });

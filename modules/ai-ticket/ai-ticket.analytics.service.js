@@ -68,6 +68,7 @@ const ALLOWED_OPERATIONS = new Set(['find', 'aggregate']);
 const KNOWN_QUERY_TYPES = new Set([
   'last_tickets',
   'last_ticket_detail',
+  'last_closed_ticket_detail',
   'top_reporters',
   'top_closers',
   'trend_summary',
@@ -99,6 +100,15 @@ const ALLOWED_TICKET_FIELDS = new Set([
   'createdAt',
   'updatedAt',
 ]);
+
+const TICKET_LIST_FIELD_MAP = {
+  status: 'Estados de Ticket',
+  priority: 'Prioridades',
+  impact: 'Impacto',
+  department: 'Departamentos',
+  type: 'Tipos de Ticket',
+  source: 'Medios de Reporte',
+};
 
 /* =========================
    UTILS
@@ -334,6 +344,10 @@ function getQuestionSignals(question) {
       (q.includes('agente') || q.includes('quien')) &&
       (q.includes('cerro') || q.includes('cerró') || q.includes('resolv')),
 
+    asksLastClosedTicket:
+      (q.includes('ultimo ticket') || q.includes('último ticket')) &&
+      (q.includes('cerro') || q.includes('cerró') || q.includes('cerrado') || q.includes('resolv')),
+
     asksLastTickets:
       includesAny(q, ['recientes', 'lista']) ||
       /(?:últimos|ultimos)\s+\d*\s*tickets?/i.test(q),
@@ -437,6 +451,14 @@ function hasDangerousOperators(value) {
 
 function pathRoot(path = '') {
   return String(path || '').replace(/^\$+/, '').split('.')[0];
+}
+
+function normalizeText(value = '') {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
 function hasDisallowedFieldReferences(value, allowedFields) {
@@ -609,35 +631,169 @@ async function planDynamicQuery(question) {
   }
 }
 
+async function resolveListItemObjectId(fieldName, rawValue) {
+  const listName = TICKET_LIST_FIELD_MAP[fieldName];
+  if (!listName) return rawValue;
+
+  if (mongoose.Types.ObjectId.isValid(rawValue)) return rawValue;
+  if (typeof rawValue !== 'string' || !rawValue.trim()) return rawValue;
+
+  const normalized = normalizeText(rawValue);
+  if (!normalized) return rawValue;
+
+  const list = await List.findOne({ name: listName, isDeleted: false })
+    .select('items._id items.label items.value items.isDeleted')
+    .lean();
+
+  if (!list?.items?.length) return rawValue;
+
+  const candidates = list.items.filter((item) => item && item.isDeleted !== true);
+  const exact = candidates.find((item) => {
+    const label = normalizeText(item.label);
+    const value = normalizeText(item.value);
+    return normalized === label || normalized === value;
+  });
+
+  if (exact?._id) return exact._id;
+
+  const partial = candidates.find((item) => {
+    const label = normalizeText(item.label);
+    const value = normalizeText(item.value);
+    return label.includes(normalized) || value.includes(normalized) || normalized.includes(label) || normalized.includes(value);
+  });
+
+  return partial?._id || rawValue;
+}
+
+async function resolveReferenceValue(fieldName, value) {
+  if (Array.isArray(value)) {
+    const resolved = [];
+    for (const item of value) {
+      resolved.push(await resolveReferenceValue(fieldName, item));
+    }
+    return resolved;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return resolveListItemObjectId(fieldName, value);
+  }
+
+  const resolved = { ...value };
+
+  if (Object.prototype.hasOwnProperty.call(resolved, '$eq')) {
+    resolved.$eq = await resolveListItemObjectId(fieldName, resolved.$eq);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(resolved, '$ne')) {
+    resolved.$ne = await resolveListItemObjectId(fieldName, resolved.$ne);
+  }
+
+  if (Array.isArray(resolved.$in)) {
+    resolved.$in = await Promise.all(resolved.$in.map((item) => resolveListItemObjectId(fieldName, item)));
+  }
+
+  if (Array.isArray(resolved.$nin)) {
+    resolved.$nin = await Promise.all(resolved.$nin.map((item) => resolveListItemObjectId(fieldName, item)));
+  }
+
+  return resolved;
+}
+
+async function resolveTicketFilterReferences(filter) {
+  if (!filter || typeof filter !== 'object') return filter;
+  if (Array.isArray(filter)) {
+    const out = [];
+    for (const item of filter) out.push(await resolveTicketFilterReferences(item));
+    return out;
+  }
+
+  const out = {};
+  for (const [key, value] of Object.entries(filter)) {
+    if (key === '$and' || key === '$or' || key === '$nor') {
+      out[key] = await resolveTicketFilterReferences(value);
+      continue;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(TICKET_LIST_FIELD_MAP, key)) {
+      out[key] = await resolveReferenceValue(key, value);
+      continue;
+    }
+
+    if (value && typeof value === 'object') {
+      out[key] = await resolveTicketFilterReferences(value);
+      continue;
+    }
+
+    out[key] = value;
+  }
+
+  return out;
+}
+
+async function normalizeDynamicQueryForExecution(dynamicQuery) {
+  if (!dynamicQuery || dynamicQuery.collection !== 'tickets') return dynamicQuery;
+
+  if (dynamicQuery.operation === 'find') {
+    return {
+      ...dynamicQuery,
+      filter: await resolveTicketFilterReferences(dynamicQuery.filter || {}),
+    };
+  }
+
+  if (dynamicQuery.operation === 'aggregate') {
+    const pipeline = Array.isArray(dynamicQuery.pipeline) ? dynamicQuery.pipeline : [];
+    const normalizedPipeline = [];
+
+    for (const stage of pipeline) {
+      if (stage && typeof stage === 'object' && !Array.isArray(stage) && stage.$match) {
+        normalizedPipeline.push({
+          ...stage,
+          $match: await resolveTicketFilterReferences(stage.$match),
+        });
+      } else {
+        normalizedPipeline.push(stage);
+      }
+    }
+
+    return {
+      ...dynamicQuery,
+      pipeline: normalizedPipeline,
+    };
+  }
+
+  return dynamicQuery;
+}
+
 function getModelByCollection(collection) {
   if (collection === 'tickets') return TicketModel;
   return null;
 }
 
 async function executeDynamicQuery(dynamicQuery) {
-  const model = getModelByCollection(dynamicQuery.collection);
+  const normalizedQuery = await normalizeDynamicQueryForExecution(dynamicQuery);
+  const model = getModelByCollection(normalizedQuery.collection);
 
   if (!model) {
-    throw new Error(`DYNAMIC_QUERY_MODEL_NOT_AVAILABLE:${dynamicQuery.collection}`);
+    throw new Error(`DYNAMIC_QUERY_MODEL_NOT_AVAILABLE:${normalizedQuery.collection}`);
   }
 
-  if (dynamicQuery.operation === 'find') {
+  if (normalizedQuery.operation === 'find') {
     return await model
-      .find(dynamicQuery.filter || {})
+      .find(normalizedQuery.filter || {})
       .maxTimeMS(AI_DB_TIMEOUT_MS)
-      .sort(dynamicQuery.sort || { createdAt: -1 })
-      .select(dynamicQuery.projection || {})
-      .limit(Math.max(Number(dynamicQuery.limit) || 10, 1))
+      .sort(normalizedQuery.sort || { createdAt: -1 })
+      .select(normalizedQuery.projection || {})
+      .limit(Math.max(Number(normalizedQuery.limit) || 10, 1))
       .lean();
   }
 
-  if (dynamicQuery.operation === 'aggregate') {
+  if (normalizedQuery.operation === 'aggregate') {
     return await model
-      .aggregate(dynamicQuery.pipeline || [])
+      .aggregate(normalizedQuery.pipeline || [])
       .option({ maxTimeMS: AI_DB_TIMEOUT_MS });
   }
 
-  throw new Error(`DYNAMIC_QUERY_OPERATION_NOT_IMPLEMENTED:${dynamicQuery.operation}`);
+  throw new Error(`DYNAMIC_QUERY_OPERATION_NOT_IMPLEMENTED:${normalizedQuery.operation}`);
 }
 
 /* =========================
@@ -646,6 +802,10 @@ async function executeDynamicQuery(dynamicQuery) {
 
 function resolveFinalIntent({ llm, fallback, question }) {
   const signals = getQuestionSignals(question);
+
+  if (signals.asksLastClosedTicket) {
+    return { queryType: 'last_closed_ticket_detail', timeRange: 'all', limit: 1, daysBack: null };
+  }
 
   if (signals.mentionsReporter) {
     return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null };
@@ -699,6 +859,17 @@ async function getLastTicketDetail() {
     .select('code subject description createdAt updatedAt requester')
     .populate('requester', 'name email')
     .sort({ createdAt: -1 })
+    .lean();
+}
+
+async function getLastClosedTicketDetail() {
+  return await TicketModel.findOne({
+    closedBy: { $exists: true, $ne: null },
+  })
+    .maxTimeMS(AI_DB_TIMEOUT_MS)
+    .select('code subject description closedAt updatedAt closedBy')
+    .populate('closedBy', 'name email')
+    .sort({ closedAt: -1, updatedAt: -1 })
     .lean();
 }
 
@@ -819,6 +990,12 @@ async function generateAnalyticsResponse(params) {
         data: await getLastTicketDetail(),
       };
 
+    case 'last_closed_ticket_detail':
+      return {
+        type: 'last_closed_ticket_detail',
+        data: await getLastClosedTicketDetail(),
+      };
+
     case 'top_reporters':
       return {
         type: 'top_reporters',
@@ -851,6 +1028,13 @@ function buildDeterministicAnswer(question, analytics) {
     const rows = Array.isArray(analytics.data) ? analytics.data : [];
     if (!rows.length) return 'No encontré resultados para esa consulta.';
 
+    const first = rows[0] || {};
+    const firstEntries = Object.entries(first);
+    if (firstEntries.length === 1 && typeof firstEntries[0][1] === 'number') {
+      const [metricName, metricValue] = firstEntries[0];
+      return `Resultado: ${metricName} = ${metricValue}.`;
+    }
+
     const sample = rows.slice(0, 3).map((row) => {
       if (row?.name && typeof row.count !== 'undefined') {
         return `${row.name}: ${row.count}`;
@@ -874,6 +1058,16 @@ function buildDeterministicAnswer(question, analytics) {
     const subject = analytics.data?.subject || 'sin asunto';
     const code = analytics.data?.code ? ` (${analytics.data.code})` : '';
     return `El último ticket${code} es "${subject}".`;
+  }
+
+  if (analytics.type === 'last_closed_ticket_detail') {
+    const ticket = analytics.data;
+    if (!ticket) return 'No encontré tickets cerrados para responder esa consulta.';
+
+    const closerName = ticket?.closedBy?.name || 'Agente no identificado';
+    const closerEmail = ticket?.closedBy?.email ? ` (${ticket.closedBy.email})` : '';
+    const code = ticket?.code ? ` (${ticket.code})` : '';
+    return `El último ticket cerrado${code} fue gestionado por ${closerName}${closerEmail}.`;
   }
 
   if (analytics.type === 'top_reporters') {
@@ -978,6 +1172,7 @@ async function askAnalyticsWithProgress(question, options = {}) {
     const isDirectIntent =
       signals.mentionsTopReporters ||
       signals.mentionsTopClosers ||
+      signals.asksLastClosedTicket ||
       signals.mentionsTrend ||
       signals.mentionsReporter ||
       signals.asksLastTickets;
