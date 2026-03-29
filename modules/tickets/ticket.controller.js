@@ -261,7 +261,6 @@ export const updateTicket = async (req, res) => {
     const userId = req.user.id;
 
     const updated = await TicketService.updateTicketService(id, userId, req.body);
-    console.log("Ticket actualizado:", updated);
     await createLog({
       user: userId,
       action: "ACTUALIZAR_TICKET",

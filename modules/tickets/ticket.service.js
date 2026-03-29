@@ -3,6 +3,7 @@ import List from "../list/list.model.js";
 import User from "../users/user.model.js";
 import path from "path";
 import { generateDailyReport } from "../reports/reports.service.js";
+import mongoose from "mongoose";
 
 // Generar correlativo automático
 import Counter from "../counter/counter.model.js";
@@ -301,9 +302,42 @@ export const updateTicketService = async (id, userId, data) => {
     "impact"
   ];
 
+  const objectIdFields = new Set([
+    "requester",
+    "assignedTo",
+    "department",
+    "type",
+    "source",
+    "status",
+    "priority",
+    "impact",
+  ]);
+
+  const nullLikeValues = new Set(["", "null", "undefined", "unknown", "n/a", "na", "none"]);
+
+  const normalizeObjectIdValue = (field, value) => {
+    if (value === null) return null;
+    if (value === undefined) return undefined;
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (nullLikeValues.has(trimmed.toLowerCase())) return null;
+      if (mongoose.Types.ObjectId.isValid(trimmed)) return trimmed;
+      throw new Error(`Campo "${field}" inválido: debe ser ObjectId válido o null`);
+    }
+
+    if (mongoose.Types.ObjectId.isValid(value)) return value;
+    throw new Error(`Campo "${field}" inválido: debe ser ObjectId válido o null`);
+  };
+
   for (const field of allowedFields) {
     if (data[field] !== undefined) {
-      ticket[field] = data[field];
+      if (objectIdFields.has(field)) {
+        const normalizedValue = normalizeObjectIdValue(field, data[field]);
+        if (normalizedValue !== undefined) ticket[field] = normalizedValue;
+      } else {
+        ticket[field] = data[field];
+      }
     }
   }
 
