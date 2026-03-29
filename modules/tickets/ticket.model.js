@@ -19,6 +19,7 @@ const ticketSchema = new mongoose.Schema({
   description: { type: String },
 
   requester: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+  createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
   assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 
   /**
@@ -63,6 +64,7 @@ ticketSchema.pre("save", function (next) {
 ticketSchema.index({ isDeleted: 1, createdAt: -1 });      // Listar tickets (ordenado por fecha)
 ticketSchema.index({ assignedTo: 1, status: 1 });         // Tickets por agente y estado
 ticketSchema.index({ requester: 1, createdAt: -1 });      // Tickets del cliente (ordenado)
+ticketSchema.index({ createdBy: 1, createdAt: -1 });      // Tickets creados por usuario
 ticketSchema.index({ status: 1, isDeleted: 1 });          // Filtrar por estado
 ticketSchema.index({ priority: 1, createdAt: -1 });       // Tickets por prioridad
 ticketSchema.index({ source: 1 });                        // Tickets por medio de reporte

@@ -80,19 +80,26 @@ export const createTicket = async (req, res) => {
     // =====================================================
     // 🔹 3. Crear ticket con status correcto
     // =====================================================
-    const ticket = await TicketService.createTicketService({
-      subject,
-      description,
-      requester,
-      assignedTo,
-      department: resolvedDepartment,
-      type: resolvedType,
-      source,
-      status: statusId,
-      priority: resolvedPriority,
-      impact: resolvedImpact,
-      attachments,
-    });
+    const ticket = await TicketService.createTicketService(
+      {
+        subject,
+        description,
+        requester,
+        createdBy: req.user?.id,
+        assignedTo,
+        department: resolvedDepartment,
+        type: resolvedType,
+        source,
+        status: statusId,
+        priority: resolvedPriority,
+        impact: resolvedImpact,
+        attachments,
+      },
+      {
+        changedBy: req.user?.id,
+        assignmentReason: "Asignación inicial al crear ticket",
+      }
+    );
 
     // =====================================================
     // 🔹 4. Enviar email de confirmación con header X-Ticket-ID
@@ -442,3 +449,38 @@ export const getUpdateById = async (req, res) => {
   }
 };
 
+export const getTicketAssignmentHistory = async (req, res) => {
+  try {
+    const ticketId = req.params.id;
+    const page = Number(req.query.page || 1);
+    const limit = Number(req.query.limit || 20);
+
+    const result = await TicketService.getTicketAssignmentHistoryService(ticketId, page, limit);
+
+    await createLog({
+      user: req.user?.id,
+      action: "OBTENER_HISTORIAL_ASIGNACION_TICKET",
+      module: "tickets",
+      description: `Historial de asignación consultado para ticket ${ticketId}`,
+      status: "success",
+      method: "GET",
+      ip: req.clientIp,
+    });
+
+    return res.json({ status: "success", ...result });
+  } catch (error) {
+    console.error(error);
+
+    await createLog({
+      user: req.user?.id,
+      action: "ERROR_OBTENER_HISTORIAL_ASIGNACION_TICKET",
+      module: "tickets",
+      description: error.message,
+      status: "error",
+      method: "GET",
+      ip: req.clientIp,
+    });
+
+    return res.status(400).json({ status: "error", message: error.message });
+  }
+};

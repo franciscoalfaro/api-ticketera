@@ -8,7 +8,8 @@ import {
   deleteTicket, 
   getTicketById,
   getUpdatesSummary,
-  getUpdateById
+  getUpdateById,
+  getTicketAssignmentHistory
 } from "./ticket.controller.js";
 import { auth } from "../../core/middlewares/authMiddleware.js";
 // import { logAction } from "../../core/middlewares/logMiddleware.js";
@@ -30,6 +31,7 @@ router.delete("/delete", deleteTicket);
 
 
 router.get("/getticket/:id", getTicketById);
+router.get("/:id/assignment-history", getTicketAssignmentHistory);
 
 
 router.get("/:id/updates/summary", getUpdatesSummary);

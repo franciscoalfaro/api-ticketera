@@ -69,6 +69,7 @@ const KNOWN_QUERY_TYPES = new Set([
   'last_tickets',
   'last_ticket_detail',
   'last_closed_ticket_detail',
+  'ticket_assignee_by_code',
   'top_reporters',
   'top_closers',
   'trend_summary',
@@ -143,6 +144,18 @@ function withTimeout(promise, timeoutMs, label = 'operation') {
         reject(error);
       });
   });
+}
+
+function clampLimit(value, fallback = 5) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(Math.max(Math.trunc(parsed), 1), DYNAMIC_MAX_LIMIT);
+}
+
+function extractTicketCode(question) {
+  const text = String(question || '').toUpperCase();
+  const match = text.match(/\b([A-Z]{2,}-\d{1,7})\b/);
+  return match ? match[1] : null;
 }
 
 function assertMongoConnected() {
@@ -322,35 +335,50 @@ function getDateRange(timeRange = 'this_week', daysBack = null) {
 
 function getQuestionSignals(question) {
   const q = String(question || '').toLowerCase();
+  const qNormalized = normalizeText(question);
+  const qSignal = `${q} ${qNormalized}`;
+  const ticketCode = extractTicketCode(question);
+  const mentionsAgent = includesAny(qSignal, ['agente', 'agentes', 'usuario', 'usuarios', 'quien', 'quién', 'kien']);
+  const mentionsClosureAction = includesAny(qSignal, ['cerro', 'cerró', 'cerrad', 'cerrar', 'resolv', 'cerrao', 'serro', 'serrao']);
+  const asksRanking = includesAny(qSignal, ['mas', 'más', 'top', 'mayor', 'numero 1', 'número 1']);
 
   return {
     q,
+    qNormalized,
+    ticketCode,
 
-    mentionsTrend: includesAny(q, ['tendencia', 'trend', 'evoluci']),
+    mentionsTrend: includesAny(qSignal, ['tendencia', 'trend', 'evoluci']),
 
-    mentionsRepeatedCauses: includesAny(q, ['repetid', 'causa', 'problema']),
+    mentionsRepeatedCauses: includesAny(qSignal, ['repetid', 'causa', 'problema']),
 
-    mentionsDailyPeaks: includesAny(q, ['dia', 'día', 'pico']),
+    mentionsDailyPeaks: includesAny(qSignal, ['dia', 'día', 'pico']),
 
     mentionsReporter:
-      q.includes('quien') && q.includes('report'),
+      includesAny(qSignal, ['quien', 'quién', 'kien']) && qSignal.includes('report'),
 
-    // 🔥 FIX REAL
     mentionsTopReporters:
-      (q.includes('usuario') || q.includes('usuarios')) &&
-      (q.includes('report') || q.includes('ticket')),
+      includesAny(qSignal, ['usuario', 'usuarios', 'quien', 'quién', 'kien']) &&
+      includesAny(qSignal, ['report', 'ticket', 'tiket', 'tiket', 'tikets']),
 
     mentionsTopClosers:
-      (q.includes('agente') || q.includes('quien')) &&
-      (q.includes('cerro') || q.includes('cerró') || q.includes('resolv')),
+      mentionsAgent &&
+      mentionsClosureAction &&
+      asksRanking,
 
     asksLastClosedTicket:
-      (q.includes('ultimo ticket') || q.includes('último ticket')) &&
-      (q.includes('cerro') || q.includes('cerró') || q.includes('cerrado') || q.includes('resolv')),
+      (qSignal.includes('ultimo ticket') || qSignal.includes('último ticket')) &&
+      includesAny(qSignal, ['cerro', 'cerró', 'cerrado', 'resolv']),
 
     asksLastTickets:
-      includesAny(q, ['recientes', 'lista']) ||
-      /(?:últimos|ultimos)\s+\d*\s*tickets?/i.test(q),
+      includesAny(qSignal, ['recientes', 'lista']) ||
+      /(?:ultimos|últimos)?\s*\d*\s*(?:tickets?|tikets?|tiket?s?)/i.test(qSignal),
+
+    asksTicketAssigneeByCode:
+      Boolean(ticketCode) &&
+      (
+        includesAny(qSignal, ['quien', 'quién', 'kien']) &&
+        includesAny(qSignal, ['asignad', 'asigno', 'asignó'])
+      ),
   };
 }
 
@@ -361,7 +389,7 @@ function getQuestionSignals(question) {
 function fallbackInterpretQuestion(question) {
   const q = String(question || '').toLowerCase();
   const limitMatch = q.match(/\d+/);
-  const limit = limitMatch ? Number(limitMatch[0]) : 5;
+  const limit = limitMatch ? clampLimit(limitMatch[0], 5) : 5;
 
   let timeRange = 'this_week';
   if (q.includes('hoy')) timeRange = 'today';
@@ -802,6 +830,23 @@ async function executeDynamicQuery(dynamicQuery) {
 
 function resolveFinalIntent({ llm, fallback, question }) {
   const signals = getQuestionSignals(question);
+  const semanticText = `${signals.q || ''} ${signals.qNormalized || ''}`;
+  const closureRankingGuardrail =
+    llm?.queryType === 'last_tickets' &&
+    includesAny(semanticText, ['agente', 'agentes', 'quien', 'quién', 'kien']) &&
+    includesAny(semanticText, ['cerro', 'cerró', 'cerrad', 'cerrar', 'resolv', 'cerrao', 'serro', 'serrao']) &&
+    includesAny(semanticText, ['mas', 'más', 'top', 'mayor']) &&
+    !includesAny(semanticText, ['ultimo ticket', 'último ticket']);
+
+  if (signals.asksTicketAssigneeByCode && signals.ticketCode) {
+    return {
+      queryType: 'ticket_assignee_by_code',
+      ticketCode: signals.ticketCode,
+      timeRange: 'all',
+      limit: 1,
+      daysBack: null,
+    };
+  }
 
   if (signals.asksLastClosedTicket) {
     return { queryType: 'last_closed_ticket_detail', timeRange: 'all', limit: 1, daysBack: null };
@@ -811,7 +856,7 @@ function resolveFinalIntent({ llm, fallback, question }) {
     return { queryType: 'last_ticket_detail', timeRange: 'all', limit: 1, daysBack: null };
   }
 
-  if (signals.mentionsTopClosers) {
+  if (signals.mentionsTopClosers || closureRankingGuardrail) {
     return { ...fallback, queryType: 'top_closers', limit: Math.max(Number(fallback.limit) || 5, 5) };
   }
 
@@ -870,6 +915,14 @@ async function getLastClosedTicketDetail() {
     .select('code subject description closedAt updatedAt closedBy')
     .populate('closedBy', 'name email')
     .sort({ closedAt: -1, updatedAt: -1 })
+    .lean();
+}
+
+async function getTicketAssigneeByCode(ticketCode) {
+  return await TicketModel.findOne({ code: ticketCode })
+    .maxTimeMS(AI_DB_TIMEOUT_MS)
+    .select('code subject assignedTo updatedAt')
+    .populate('assignedTo', 'name email')
     .lean();
 }
 
@@ -996,6 +1049,12 @@ async function generateAnalyticsResponse(params) {
         data: await getLastClosedTicketDetail(),
       };
 
+    case 'ticket_assignee_by_code':
+      return {
+        type: 'ticket_assignee_by_code',
+        data: await getTicketAssigneeByCode(params.ticketCode),
+      };
+
     case 'top_reporters':
       return {
         type: 'top_reporters',
@@ -1068,6 +1127,15 @@ function buildDeterministicAnswer(question, analytics) {
     const closerEmail = ticket?.closedBy?.email ? ` (${ticket.closedBy.email})` : '';
     const code = ticket?.code ? ` (${ticket.code})` : '';
     return `El último ticket cerrado${code} fue gestionado por ${closerName}${closerEmail}.`;
+  }
+
+  if (analytics.type === 'ticket_assignee_by_code') {
+    const ticket = analytics.data;
+    if (!ticket) return 'No encontré ese ticket para validar su asignación.';
+
+    const assigneeName = ticket?.assignedTo?.name || 'Sin agente asignado';
+    const assigneeEmail = ticket?.assignedTo?.email ? ` (${ticket.assignedTo.email})` : '';
+    return `El ticket ${ticket.code || ''} está asignado a ${assigneeName}${assigneeEmail}.`.trim();
   }
 
   if (analytics.type === 'top_reporters') {
@@ -1170,6 +1238,7 @@ async function askAnalyticsWithProgress(question, options = {}) {
     let llm = null;
 
     const isDirectIntent =
+      signals.asksTicketAssigneeByCode ||
       signals.mentionsTopReporters ||
       signals.mentionsTopClosers ||
       signals.asksLastClosedTicket ||

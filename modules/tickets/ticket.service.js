@@ -1,4 +1,5 @@
 import Ticket from "./ticket.model.js";
+import TicketAssignmentLog from "./ticket-assignment-log.model.js";
 import List from "../list/list.model.js";
 import User from "../users/user.model.js";
 import path from "path";
@@ -130,9 +131,50 @@ export const generateTicketCode = async () => {
   return await generator.generateTicketCode();
 };
 
+const normalizeActorId = (value) => {
+  if (!value) return null;
+  return mongoose.Types.ObjectId.isValid(value) ? value : null;
+};
+
+const toNullableObjectId = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    return mongoose.Types.ObjectId.isValid(trimmed) ? trimmed : null;
+  }
+  return mongoose.Types.ObjectId.isValid(value) ? value : null;
+};
+
+const sameObjectId = (left, right) => {
+  const leftId = toNullableObjectId(left);
+  const rightId = toNullableObjectId(right);
+  return String(leftId || "") === String(rightId || "");
+};
+
+const resolveAssignmentAction = (fromUser, toUser) => {
+  if (!fromUser && toUser) return "assigned";
+  if (fromUser && !toUser) return "unassigned";
+  return "reassigned";
+};
+
+const createAssignmentAuditLog = async ({ ticketId, fromUser, toUser, changedBy, reason = null }) => {
+  if (sameObjectId(fromUser, toUser)) return null;
+
+  return await TicketAssignmentLog.create({
+    ticket: ticketId,
+    fromUser: toNullableObjectId(fromUser),
+    toUser: toNullableObjectId(toUser),
+    changedBy: normalizeActorId(changedBy),
+    action: resolveAssignmentAction(fromUser, toUser),
+    reason: reason ? String(reason).trim() : null,
+    at: new Date(),
+  });
+};
+
 
 // Crear ticket
-export const createTicketService = async (data) => {
+export const createTicketService = async (data, options = {}) => {
   // Generar código automático
   const code = await generateTicketCode();
   const ticket = new Ticket({
@@ -141,6 +183,17 @@ export const createTicketService = async (data) => {
   });
 
   await ticket.save();
+
+  if (ticket.assignedTo) {
+    await createAssignmentAuditLog({
+      ticketId: ticket._id,
+      fromUser: null,
+      toUser: ticket.assignedTo,
+      changedBy: options.changedBy || data.requester || null,
+      reason: options.assignmentReason || "Asignación inicial del ticket",
+    });
+  }
+
   await generateDailyReport(ticket.createdAt);
   return ticket;
 };
@@ -152,6 +205,7 @@ export const getTicketsService = async (page = 1, limit = 10) => {
   const [tickets, total] = await Promise.all([
     Ticket.find({ isDeleted: false })
       .populate("requester", "name email")
+      .populate("createdBy", "name email")
       .populate("assignedTo", "name email")
       .populate("closedBy", "name email")
       .sort({ createdAt: -1 })
@@ -203,6 +257,7 @@ export const getTicketsService = async (page = 1, limit = 10) => {
 export const getTicketByIdService = async (id) => {
   const ticket = await Ticket.findById(id)
     .populate("requester", "name email role")
+    .populate("createdBy", "name email")
     .populate("assignedTo", "name email")
     .populate("closedBy", "name email")
     .lean();
@@ -242,7 +297,12 @@ export const getMyTicketsService = async (userId, page = 1, limit = 10) => {
   const filter = { isDeleted: false, assignedTo: userId };
 
   const [tickets, total] = await Promise.all([
-    Ticket.find(filter).populate("assignedTo", "name email").sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Ticket.find(filter)
+      .populate("assignedTo", "name email")
+      .populate("createdBy", "name email")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
     Ticket.countDocuments(filter),
   ]);
 
@@ -271,6 +331,7 @@ export const updateTicketService = async (id, userId, data) => {
 
   const ticket = await Ticket.findById(id);
   if (!ticket) throw new Error("Ticket no encontrado");
+  const previousAssignedTo = toNullableObjectId(ticket.assignedTo);
 
   // 🔹 Buscar el estado "closed" dentro de la lista "Estados de Ticket"
   const estadosList = await List.findOne({ name: "Estados de Ticket" }).lean();
@@ -343,6 +404,18 @@ export const updateTicketService = async (id, userId, data) => {
 
   ticket.updatedAt = new Date();
   await ticket.save();
+
+  const currentAssignedTo = toNullableObjectId(ticket.assignedTo);
+  if (!sameObjectId(previousAssignedTo, currentAssignedTo)) {
+    await createAssignmentAuditLog({
+      ticketId: ticket._id,
+      fromUser: previousAssignedTo,
+      toUser: currentAssignedTo,
+      changedBy: userId,
+      reason: data.assignmentReason || data.reason || null,
+    });
+  }
+
   await generateDailyReport(ticket.createdAt);
 
   return ticket;
@@ -439,3 +512,36 @@ export const getUpdateByIdService = async (updateId) => {
 
   return ticket.updates[0];
 };
+
+export const getTicketAssignmentHistoryService = async (ticketId, page = 1, limit = 20) => {
+  if (!mongoose.Types.ObjectId.isValid(ticketId)) {
+    throw new Error("ID de ticket inválido");
+  }
+
+  const resolvedPage = Math.max(Number(page) || 1, 1);
+  const resolvedLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const skip = (resolvedPage - 1) * resolvedLimit;
+
+  const [history, total] = await Promise.all([
+    TicketAssignmentLog.find({ ticket: ticketId })
+      .populate("fromUser", "name email")
+      .populate("toUser", "name email")
+      .populate("changedBy", "name email")
+      .sort({ at: -1 })
+      .skip(skip)
+      .limit(resolvedLimit)
+      .lean(),
+    TicketAssignmentLog.countDocuments({ ticket: ticketId }),
+  ]);
+
+  return {
+    history,
+    pagination: {
+      currentPage: resolvedPage,
+      limit: resolvedLimit,
+      total,
+      totalPages: Math.ceil(total / resolvedLimit),
+    },
+  };
+};
+
